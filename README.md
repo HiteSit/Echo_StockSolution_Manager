@@ -1,17 +1,20 @@
 # Chemical Groups Web Application
 
-A web-based platform for uploading, validating, and merging chemical group CSV data. The application consists of a FastAPI backend and a Streamlit frontend, coordinated by a launcher script (`RUN.sh`).
+A modern, robust platform for uploading, validating, and merging chemical group CSV data. The system features a FastAPI backend and a Streamlit frontend, coordinated by a powerful launcher script (`RUN.sh`).
 
 ---
 
 ## Table of Contents
 - [Features](#features)
-- [Repository Structure](#repository-structure)
-- [Quickstart](#quickstart)
-- [Manual Run Instructions](#manual-run-instructions)
-- [Backend](#backend)
-- [Frontend](#frontend)
-- [Configuration & Data](#configuration--data)
+- [Architecture & Repository Structure](#architecture--repository-structure)
+- [Setup & Quickstart](#setup--quickstart)
+- [Running the Application](#running-the-application)
+  - [Local (localhost-only)](#1-run-locally-default)
+  - [On a Local Network (LAN)](#2-run-on-local-network-lan)
+  - [On the Internet (Production)](#3-run-on-the-internet-production)
+- [Configuration & Customization](#configuration--customization)
+- [Backend Details](#backend-details)
+- [Frontend Details](#frontend-details)
 - [Dependencies](#dependencies)
 - [Troubleshooting](#troubleshooting)
 - [FAQ](#faq)
@@ -19,47 +22,47 @@ A web-based platform for uploading, validating, and merging chemical group CSV d
 ---
 
 ## Features
-- Upload CSV files for specific chemical groups
-- Schema and data validation against a reference
-- Conflict detection and merge history
-- Easy-to-use web interface (Streamlit)
-- REST API (FastAPI) for backend operations
-- Automated and manual launch options
+- Upload and validate CSV files for specific chemical groups
+- Strict schema and data validation against a reference
+- Conflict detection, merge history logging, and prevention of accidental deletions
+- Intuitive Streamlit web interface
+- REST API (FastAPI) for programmatic access
+- Automated one-command launch with advanced error handling
 
 ---
 
-## Repository Structure
+## Architecture & Repository Structure
 ```
 .
 ├── RUN.sh              # Main launcher script (backend + frontend)
-├── src/                # Source code directory
-│   ├── backend/        # FastAPI backend service
-│   │   └── main.py
-│   └── frontend/       # Streamlit frontend app
-│       └── app.py
-├── data/               # Data directory (chemical_groups.json, Example.csv, master CSVs)
+├── src/
+│   ├── backend/
+│   │   └── main.py     # FastAPI backend
+│   └── frontend/
+│       └── app.py      # Streamlit frontend
+├── data/               # Data/config directory (chemical_groups.json, Example.csv, master CSVs)
 ├── requirements.txt    # Python dependencies
-├── pyproject.toml      # Project metadata and dependencies
+├── pyproject.toml      # Project metadata
 ├── .venv/              # (Recommended) Virtual environment
 └── README.md           # This file
 ```
 
 ---
 
-## Quickstart
-### 1. Prerequisites
-- Python 3.7 or higher (3.11+ recommended)
-- Unix-like OS (Linux/Mac; Windows WSL works)
-- Recommended: `uv` for fast dependency install ([uv documentation](https://github.com/astral-sh/uv))
+## Setup & Quickstart
+### Prerequisites
+- Python 3.7+ (3.11+ recommended)
+- Unix-like OS (Linux/Mac/WSL)
+- [uv](https://github.com/astral-sh/uv) (optional, for faster installs)
 
-### 2. One-Command Launch (Recommended)
+### One-Command Launch (Recommended)
 From the project root:
 ```bash
 bash RUN.sh install
 ```
-- Installs dependencies (if not already installed)
+- Installs dependencies if needed
 - Starts backend (FastAPI) and frontend (Streamlit)
-- Logs are saved as `backend.log` and `frontend.log`
+- Logs to `backend.log` and `frontend.log`
 
 To stop all services:
 ```bash
@@ -68,106 +71,140 @@ bash RUN.sh stop
 
 ---
 
-## Manual Run Instructions
-If you want to run backend and frontend manually, follow these steps:
+## Running the Application
 
-### 1. Set Up Virtual Environment
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
+### 1. Run Locally (Default)
+This is the simplest mode—accessible only from your own computer.
 
-### 2. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-Or with `uv` (if available):
-```bash
-uv pip install -r requirements.txt
-```
+- **Start with:**
+  ```bash
+  bash RUN.sh install
+  ```
+- **Backend:** http://localhost:8000
+- **Frontend:** http://localhost:8501
+- **No changes needed.**
 
-### 3. Prepare Data Directory
-Ensure `data/chemical_groups.json` and `data/Example.csv` exist. The launcher will create a default `chemical_groups.json` if missing.
+### 2. Run on Local Network (LAN)
+To access the app from other devices on your network:
 
-### 4. Start Backend (FastAPI)
-From the project root:
-```bash
-uvicorn src.backend.main:app --reload --port 8000 > backend.log 2>&1 &
-```
-- The backend API will be available at http://localhost:8000
+1. **Find your local IP address:**
+   ```bash
+   hostname -I  # or: ip addr show
+   ```
+   Suppose it's `192.168.1.42`.
 
-### 5. Start Frontend (Streamlit)
-From the project root:
-```bash
-streamlit run src/frontend/app.py --server.port 8501 > frontend.log 2>&1 &
-```
-- The frontend UI will be at http://localhost:8501
+2. **Start backend and frontend on `0.0.0.0` (all interfaces):**
+   - Edit `RUN.sh` (or run manually):
+     ```bash
+     uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
+     streamlit run src/frontend/app.py --server.address 0.0.0.0 --server.port 8501 > frontend.log 2>&1 &
+     ```
+   - Or modify `RUN.sh` to use `0.0.0.0` for both.
+
+3. **Update CORS for LAN:**
+   - Set the environment variable before starting backend:
+     ```bash
+     export ALLOWED_ORIGINS="http://192.168.1.42:8501"
+     ```
+
+4. **Access from any device on your LAN:**
+   - Frontend: http://192.168.1.42:8501
+   - Backend: http://192.168.1.42:8000
+
+**Note:**
+- Open firewall ports 8000 and 8501 if needed.
+- For best results, set a static IP for your host machine.
+
+### 3. Run on the Internet (Production)
+To expose the app publicly:
+
+1. **Use a secure server (cloud VM, etc.)**
+2. **Reverse proxy with HTTPS (highly recommended):**
+   - Use Nginx/Apache/Caddy to proxy `localhost:8000` and `localhost:8501` to your public domain.
+   - Obtain SSL certificates (e.g., with [Let's Encrypt](https://letsencrypt.org/)).
+3. **Set CORS for your public domain:**
+   - Example:
+     ```bash
+     export ALLOWED_ORIGINS="https://yourdomain.com"
+     ```
+4. **Open firewall ports 80/443 (HTTP/HTTPS).**
+5. **Security Best Practices:**
+   - Use strong passwords for server access.
+   - Restrict backend API to only needed origins.
+   - Regularly update dependencies.
+   - Consider running behind authentication or VPN for sensitive data.
 
 ---
 
-## Backend
-- **Framework:** FastAPI
+## Configuration & Customization
+- **Ports:**
+  - Default: Backend 8000, Frontend 8501.
+  - Change by editing `RUN.sh` or passing `--backend-port=XXXX`/`--frontend-port=XXXX`.
+- **CORS:**
+  - Set `ALLOWED_ORIGINS` env variable to allow frontend-backend communication across hosts.
+- **Backend URL in Frontend:**
+  - Edit `src/frontend/app.py`, change the `BACKEND` variable to your backend's address.
+- **Data Files:**
+  - `data/chemical_groups.json`: List of allowed chemical groups.
+  - `data/Example.csv`: Reference CSV schema.
+  - `data/master_<Group>.csv`: Master data for each group.
+  - `data/merge_history.csv`: Merge operation log.
+
+---
+
+## Backend Details
 - **Entrypoint:** `src/backend/main.py`
+- **Framework:** FastAPI
 - **API Endpoints:**
-    - `GET /chemical_groups` — List available groups
-    - `POST /upload_csv` — Upload and merge CSV for a group
-    - `GET /health` — Health check
-- **Data Validation:**
-    - Checks schema, ID patterns, and group types
-    - Prevents deletions and detects conflicts
-- **Logs:** Output to `backend.log`
+  - `GET /chemical_groups` — List groups
+  - `POST /upload_csv` — Upload/merge CSV for a group
+  - `GET /health` — Health check
+- **Validation:** Checks schema, ID patterns, group types, prevents deletions, detects conflicts.
+- **CORS:** Controlled by `ALLOWED_ORIGINS` (default: `http://localhost:8501`).
+- **Logs:** `backend.log`
 
-## Frontend
-- **Framework:** Streamlit
+## Frontend Details
 - **Entrypoint:** `src/frontend/app.py`
+- **Framework:** Streamlit
 - **Features:**
-    - File upload UI
-    - Group selection
-    - Displays upload results and conflicts
-    - Troubleshooting tips
-- **Logs:** Output to `frontend.log`
-
----
-
-## Configuration & Data
-- `data/chemical_groups.json` — List of allowed chemical groups, e.g. `{ "groups": ["Amines", "Ethers"] }`
-- `data/Example.csv` — Reference CSV schema (column names/order)
-- `data/master_<Group>.csv` — Master data for each group (created/updated by backend)
-- `data/merge_history.csv` — Log of merge operations
+  - File upload and group selection UI
+  - Displays upload results, conflicts, troubleshooting
+- **Backend URL:** Set in `app.py` (`BACKEND = ...`)
+- **Logs:** `frontend.log`
 
 ---
 
 ## Dependencies
 - Listed in `requirements.txt` and `pyproject.toml`
 - Key packages:
-    - fastapi, uvicorn
-    - streamlit
-    - pandas
-    - requests
-    - pydantic
-    - python-multipart
+  - fastapi, uvicorn
+  - streamlit
+  - pandas
+  - requests
+  - pydantic
+  - python-multipart
 - Install with `pip install -r requirements.txt` or via `uv`
 
 ---
 
 ## Troubleshooting
 - **Backend/Frontend not starting:**
-    - Check `backend.log` and `frontend.log` for errors
-    - Ensure required ports (8000, 8501) are free (or use `RUN.sh` to auto-select ports)
+  - Check `backend.log` and `frontend.log` for errors
+  - Ensure required ports (8000, 8501) are free (or let `RUN.sh` auto-select)
 - **Missing data files:**
-    - `RUN.sh` will create a default `chemical_groups.json` if missing
-    - Ensure `Example.csv` exists in `data/`
+  - `RUN.sh` creates default `chemical_groups.json` if missing
+  - Ensure `Example.csv` exists in `data/`
 - **Dependency issues:**
-    - Re-run `pip install -r requirements.txt` or `uv pip install -r requirements.txt`
+  - Re-run `pip install -r requirements.txt` or `uv pip install -r requirements.txt`
 - **To stop all services:**
-    - `bash RUN.sh stop`
-    - Or manually kill processes using `ps` and `kill`
+  - `bash RUN.sh stop`
+  - Or manually kill processes using `ps` and `kill`
 
 ---
 
 ## FAQ
 **Q: Can I run backend and frontend on different machines?**
-- Yes, but update the `BACKEND` URL in `frontend/app.py` and set CORS origins in backend accordingly.
+- Yes. Update the `BACKEND` URL in `frontend/app.py` and set `ALLOWED_ORIGINS` in backend accordingly.
 
 **Q: How do I add a new chemical group?**
 - Edit `data/chemical_groups.json` and add the group name to the `groups` list.
@@ -178,6 +215,9 @@ streamlit run src/frontend/app.py --server.port 8501 > frontend.log 2>&1 &
 **Q: How do I restart everything?**
 - `bash RUN.sh restart` or stop then start manually as above.
 
+**Q: How do I secure the app for production?**
+- Always use HTTPS, restrict CORS, use a reverse proxy, and keep dependencies up-to-date.
+
 ---
 
-For further questions, please check the code comments or contact the maintainer.
+For further details, consult the code comments or contact the maintainer.
