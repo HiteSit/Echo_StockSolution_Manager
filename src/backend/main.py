@@ -36,7 +36,9 @@ app.add_middleware(
 )
 
 # Constants and configuration
-DATA_DIR = os.path.join(os.path.dirname(__file__), "../data")
+# Get the project root directory (two levels up from the backend module)
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 CHEMICAL_GROUPS_FILE = os.path.join(DATA_DIR, "chemical_groups.json")
 REFERENCE_CSV = os.path.join(DATA_DIR, "Example.csv")
 

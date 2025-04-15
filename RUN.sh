@@ -142,7 +142,7 @@ setup_environment() {
 start_backend() {
     log_info "Starting backend (FastAPI) on http://localhost:$BACKEND_PORT ..."
     cd "$APP_DIR"
-    nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port "$BACKEND_PORT" > backend.log 2>&1 &
+    nohup python3 -m uvicorn src.backend.main:app --host 0.0.0.0 --port "$BACKEND_PORT" > backend.log 2>&1 &
     BACKEND_PID=$!
     
     # Check if backend started successfully
@@ -159,7 +159,7 @@ start_backend() {
 start_frontend() {
     log_info "Starting frontend (Streamlit) on http://localhost:$FRONTEND_PORT ..."
     cd "$APP_DIR"
-    nohup streamlit run frontend/app.py > frontend.log 2>&1 &
+    nohup streamlit run src/frontend/app.py > frontend.log 2>&1 &
     FRONTEND_PID=$!
     
     # Check if frontend started successfully

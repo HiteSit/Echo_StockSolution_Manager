@@ -32,10 +32,11 @@ A web-based platform for uploading, validating, and merging chemical group CSV d
 ```
 .
 ├── RUN.sh              # Main launcher script (backend + frontend)
-├── backend/            # FastAPI backend service
-│   └── main.py
-├── frontend/           # Streamlit frontend app
-│   └── app.py
+├── src/                # Source code directory
+│   ├── backend/        # FastAPI backend service
+│   │   └── main.py
+│   └── frontend/       # Streamlit frontend app
+│       └── app.py
 ├── data/               # Data directory (chemical_groups.json, Example.csv, master CSVs)
 ├── requirements.txt    # Python dependencies
 ├── pyproject.toml      # Project metadata and dependencies
@@ -91,14 +92,14 @@ Ensure `data/chemical_groups.json` and `data/Example.csv` exist. The launcher wi
 ### 4. Start Backend (FastAPI)
 From the project root:
 ```bash
-uvicorn backend.main:app --reload --port 8000 > backend.log 2>&1 &
+uvicorn src.backend.main:app --reload --port 8000 > backend.log 2>&1 &
 ```
 - The backend API will be available at http://localhost:8000
 
 ### 5. Start Frontend (Streamlit)
 From the project root:
 ```bash
-streamlit run frontend/app.py --server.port 8501 > frontend.log 2>&1 &
+streamlit run src/frontend/app.py --server.port 8501 > frontend.log 2>&1 &
 ```
 - The frontend UI will be at http://localhost:8501
 
@@ -106,7 +107,7 @@ streamlit run frontend/app.py --server.port 8501 > frontend.log 2>&1 &
 
 ## Backend
 - **Framework:** FastAPI
-- **Entrypoint:** `backend/main.py`
+- **Entrypoint:** `src/backend/main.py`
 - **API Endpoints:**
     - `GET /chemical_groups` — List available groups
     - `POST /upload_csv` — Upload and merge CSV for a group
@@ -118,7 +119,7 @@ streamlit run frontend/app.py --server.port 8501 > frontend.log 2>&1 &
 
 ## Frontend
 - **Framework:** Streamlit
-- **Entrypoint:** `frontend/app.py`
+- **Entrypoint:** `src/frontend/app.py`
 - **Features:**
     - File upload UI
     - Group selection
