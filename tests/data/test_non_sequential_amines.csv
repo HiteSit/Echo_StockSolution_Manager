@@ -1,5 +1,0 @@
-ID,Box,Type,Building Block ID,Smiles,CAS,Old Fluics,Mass (mg),Conc (M),Volume (uL)
-Amine_20,Amine_Box_1,Amine,IMA-XXXX,CC(C)N,,,2.5,0.5,
-Amine_21,Amine_Box_1,Amine,IMA-XXXX,CC(N)C1CCCCC1,,,3.4,0.5,
-Amine_22,Amine_Box_1,Amine,,CC(N)C1CCCCC1,Placeholder,Placeholder,6.1,0.5, 
-Amine_35,Amine_Box_1,Amine,,CC(N)C1CCCCC1,Placeholder,Placeholder,6.1,0.5, 
