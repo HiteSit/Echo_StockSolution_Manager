@@ -25,7 +25,8 @@ app = FastAPI(
 
 # Configure CORS middleware for frontend communication
 # Get allowed origins from environment variables or use default for development
-allowed_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:8501").split(",")
+# Default now includes wildcard for network access
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:8501,http://*:8501").split(",")
 
 app.add_middleware(
     CORSMiddleware,

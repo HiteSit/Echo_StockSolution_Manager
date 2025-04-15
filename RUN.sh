@@ -159,7 +159,7 @@ start_backend() {
 start_frontend() {
     log_info "Starting frontend (Streamlit) on http://localhost:$FRONTEND_PORT ..."
     cd "$APP_DIR"
-    nohup streamlit run src/frontend/app.py > frontend.log 2>&1 &
+    nohup streamlit run src/frontend/app.py --server.address 0.0.0.0 --server.port "$FRONTEND_PORT" > frontend.log 2>&1 &
     FRONTEND_PID=$!
     
     # Check if frontend started successfully
@@ -229,6 +229,38 @@ stop_services() {
     fi
 }
 
+# Function to get the machine's IP address for network access
+get_network_ip() {
+    # Try multiple methods to get an IP address
+    if command -v hostname &> /dev/null; then
+        IP=$(hostname -I | awk '{print $1}')
+        if [ -n "$IP" ]; then
+            echo $IP
+            return 0
+        fi
+    fi
+    
+    if command -v ip &> /dev/null; then
+        IP=$(ip addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n 1)
+        if [ -n "$IP" ]; then
+            echo $IP
+            return 0
+        fi
+    fi
+    
+    if command -v ifconfig &> /dev/null; then
+        IP=$(ifconfig | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d: -f2 | head -n 1)
+        if [ -n "$IP" ]; then
+            echo $IP
+            return 0
+        fi
+    fi
+    
+    # If all methods fail, use localhost
+    echo "localhost"
+    return 1
+}
+
 # Check for arguments
 if [ "$1" == "stop" ]; then
     # Stop any running services
@@ -238,6 +270,28 @@ elif [ "$1" == "restart" ]; then
     # Restart services (stop and then start)
     stop_services
     # Continue with startup (fallthrough)
+elif [ "$1" == "network" ] || [ "$1" == "--network" ]; then
+    # Force network mode with explicit IP
+    if [ -n "$2" ]; then
+        # Use provided IP if given
+        NETWORK_IP="$2"
+        shift 2
+    else
+        # Otherwise autodetect
+        NETWORK_IP=$(get_network_ip)
+        shift
+    fi
+    log_info "Network mode enabled. Using IP: $NETWORK_IP"
+    # Force network mode settings
+    export BACKEND_HOST="$NETWORK_IP"
+    export ALLOWED_ORIGINS="http://$NETWORK_IP:8501,http://localhost:8501"
+elif [ "$1" == "local" ] || [ "$1" == "--local" ]; then
+    # Force local-only mode
+    NETWORK_IP="localhost"
+    export BACKEND_HOST="localhost"
+    export ALLOWED_ORIGINS="http://localhost:8501"
+    log_info "Local-only mode enabled. App will not be accessible over network."
+    shift
 elif [[ "$1" == --backend-port=* ]]; then
     # Set custom backend port
     BACKEND_PORT=${1#*=}
@@ -263,6 +317,13 @@ else
     setup_environment
 fi
 
+# Get network IP for display
+NETWORK_IP=$(get_network_ip)
+
+# Configure frontend to find backend by setting environment variable
+export BACKEND_HOST="$NETWORK_IP"
+export BACKEND_PORT="$BACKEND_PORT"
+
 # Display ports being used
 log_info "Using backend port: $BACKEND_PORT"
 log_info "Using frontend port: $FRONTEND_PORT"
@@ -274,7 +335,11 @@ save_pids
 # Print summary
 echo -e "\n${BOLD}-------------------------------------${RESET}"
 log_success "Services started successfully!"
-echo -e "${BOLD}Backend:${RESET} http://localhost:$BACKEND_PORT"
-echo -e "${BOLD}Frontend:${RESET} http://localhost:$FRONTEND_PORT"
+echo -e "${BOLD}Local Backend:${RESET} http://localhost:$BACKEND_PORT"
+echo -e "${BOLD}Local Frontend:${RESET} http://localhost:$FRONTEND_PORT"
+echo -e "\n${BOLD}Network Backend:${RESET} http://$NETWORK_IP:$BACKEND_PORT"
+echo -e "${BOLD}Network Frontend:${RESET} http://$NETWORK_IP:$FRONTEND_PORT"
 echo -e "\nTo stop the application, run: $0 stop"
+echo -e "To run in network-only mode: $0 network [optional-ip]"
+echo -e "To run in local-only mode: $0 local"
 echo -e "${BOLD}-------------------------------------${RESET}\n"

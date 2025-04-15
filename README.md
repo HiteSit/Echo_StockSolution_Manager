@@ -87,33 +87,26 @@ This is the simplest mode—accessible only from your own computer.
 ### 2. Run on Local Network (LAN)
 To access the app from other devices on your network:
 
-1. **Find your local IP address:**
+1. **Start with network mode:**
    ```bash
-   hostname -I  # or: ip addr show
+   bash RUN.sh network
    ```
-   Suppose it's `192.168.1.42`.
+   The script will automatically detect your IP address and configure everything.
 
-2. **Start backend and frontend on `0.0.0.0` (all interfaces):**
-   - Edit `RUN.sh` (or run manually):
-     ```bash
-     uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
-     streamlit run src/frontend/app.py --server.address 0.0.0.0 --server.port 8501 > frontend.log 2>&1 &
-     ```
-   - Or modify `RUN.sh` to use `0.0.0.0` for both.
+2. **Specify a custom IP (if needed):**
+   ```bash
+   bash RUN.sh network 192.168.1.42
+   ```
+   Use this if you have multiple network interfaces or want to specify a particular IP.
 
-3. **Update CORS for LAN:**
-   - Set the environment variable before starting backend:
-     ```bash
-     export ALLOWED_ORIGINS="http://192.168.1.42:8501"
-     ```
-
-4. **Access from any device on your LAN:**
-   - Frontend: http://192.168.1.42:8501
-   - Backend: http://192.168.1.42:8000
+3. **Access from any device on your LAN:**
+   - Frontend: http://YOUR_IP:8501
+   - Backend: http://YOUR_IP:8000
 
 **Note:**
 - Open firewall ports 8000 and 8501 if needed.
 - For best results, set a static IP for your host machine.
+- The RUN.sh script will display the network URLs when it starts.
 
 ### 3. Run on the Internet (Production)
 To expose the app publicly:
@@ -148,11 +141,7 @@ To expose the app publicly:
   - `data/chemical_groups.json`: List of allowed chemical groups.
   - `data/Example.csv`: Reference CSV schema.
   - `data/master_<Group>.csv`: Master data for each group.
-  - `data/merge_history.csv`: Merge operation log.
-
----
-
-## Backend Details
+  - `data/merge_history.csv`:  
 - **Entrypoint:** `src/backend/main.py`
 - **Framework:** FastAPI
 - **API Endpoints:**
@@ -214,6 +203,11 @@ To expose the app publicly:
 
 **Q: How do I restart everything?**
 - `bash RUN.sh restart` or stop then start manually as above.
+
+**Q: How do I make the application accessible on my network?**
+- Run `bash RUN.sh network` to configure the app for network access.
+- For more control, you can specify an IP address: `bash RUN.sh network 192.168.1.42`.
+- If you need to go back to local-only mode, use `bash RUN.sh local`.
 
 **Q: How do I secure the app for production?**
 - Always use HTTPS, restrict CORS, use a reverse proxy, and keep dependencies up-to-date.

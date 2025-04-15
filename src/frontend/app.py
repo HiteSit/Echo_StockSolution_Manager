@@ -5,6 +5,7 @@ with validation and integration with the backend API.
 """
 
 import logging
+import os
 from typing import Dict, List, Optional, Tuple, Union, Any
 
 import requests
@@ -18,7 +19,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration constants
-BACKEND = "http://localhost:8000"
+# Allow configuring backend URL via environment variable
+BACKEND_HOST = os.environ.get("BACKEND_HOST", "localhost")
+BACKEND_PORT = os.environ.get("BACKEND_PORT", "8000")
+BACKEND = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
 APP_TITLE = "Chemical Groups Data Manager"
 APP_DESCRIPTION = "Upload and manage chemical group data through CSV files"
 
@@ -236,10 +240,23 @@ def check_backend_status() -> None:
         response = requests.get(f"{BACKEND}/health", timeout=2)
         if response.status_code == 200:
             st.success("Backend: Connected")
+            
+            # Show additional backend connection details
+            with st.expander("Connection Details"):
+                st.code(f"Backend URL: {BACKEND}")
+                st.code(f"Backend Host: {BACKEND_HOST}")
+                st.code(f"Backend Port: {BACKEND_PORT}")
+                
+                # Show the response data if available
+                try:
+                    data = response.json()
+                    st.code(f"Backend Response: {data}")
+                except:
+                    pass
         else:
-            st.error("Backend: Unreachable (Invalid Response)")
-    except Exception:
-        st.error("Backend: Unreachable (Connection Failed)")
+            st.error(f"Backend: Unreachable (Invalid Response: {response.status_code})")
+    except Exception as e:
+        st.error(f"Backend: Unreachable (Connection Failed: {str(e)})")
 
 
 def process_file_upload(file: Any, chemical_group: str) -> None:
@@ -427,6 +444,9 @@ def display_upload_results(result: Dict[str, Any]) -> None:
 
 def display_troubleshooting_info() -> None:
     """Display troubleshooting information when backend issues occur."""
+    # Display backend URL for debugging
+    st.warning(f"Current backend URL: {BACKEND}")
+    
     with st.expander("Troubleshooting Steps"):
         st.markdown("""
         ### Troubleshooting Steps
@@ -440,10 +460,15 @@ def display_troubleshooting_info() -> None:
            - Confirm it has the correct format: `{"groups": ["Group1", "Group2", ...]}`
         
         3. **Check network connectivity**
-           - Ensure localhost connections are not blocked
-           - Verify no firewall is blocking the connection
+           - If using network access, ensure the backend is accessible from this machine
+           - Check that CORS is properly configured in the backend
+           - Verify that both machines can communicate (no firewall blocking)
         
-        4. **Restart the application**
+        4. **Environment Variables**
+           - You can set `BACKEND_HOST` and `BACKEND_PORT` to configure the backend connection
+           - Example: `export BACKEND_HOST=192.168.1.100` before starting the app
+        
+        5. **Restart the application**
            - Stop both frontend and backend
            - Run the RUN.sh script again
         """)
