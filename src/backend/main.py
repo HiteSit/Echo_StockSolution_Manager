@@ -217,9 +217,12 @@ def get_new_rows(master_df: pd.DataFrame, upload_df: pd.DataFrame) -> pd.DataFra
     Returns:
         pd.DataFrame: DataFrame containing only new rows
     """
+    # Find IDs present in upload but not in master
     master_ids = set(master_df["ID"])
     upload_ids = set(upload_df["ID"])
     new_ids = upload_ids - master_ids
+    
+    # Return the DataFrame with only those new IDs
     return upload_df[upload_df["ID"].isin(new_ids)].copy()
 
 
@@ -321,7 +324,7 @@ async def get_chemical_groups() -> Dict[str, List[str]]:
 async def upload_csv(
     file: UploadFile = File(...),
     chemical_group: str = Query(..., description="Chemical group to upload to (case-sensitive)"),
-    force: bool = Query(False, description="Force merge even with non-sequential IDs")
+    force: bool = Query(False, description="Force merge even with non-sequential IDs or conflicts")
 ) -> Dict[str, Any]:
     """
     Upload a CSV for a specific chemical group, validate, compare with existing data,
@@ -330,6 +333,7 @@ async def upload_csv(
     Args:
         file: Uploaded CSV file
         chemical_group: Name of the chemical group to upload to
+        force: Whether to force the merge despite warnings or conflicts
         
     Returns:
         Dict containing status, message, and diff summary
@@ -379,16 +383,22 @@ async def upload_csv(
 
     # 8. Find conflicts
     conflicts = find_conflicts(master_df, df)
-    if conflicts:
+    
+    # 8.1 Handle conflicts based on force parameter
+    if conflicts and not force:
         return JSONResponse(status_code=400, content={
             "status": "error",
             "error_type": "conflict",
             "detail": f"Conflicting IDs found: {sorted(conflicts)}",
             "diff": {"new": [], "conflicts": conflicts, "deletions": []}
         })
-
-    # 9. Find new rows
-    new_rows = get_new_rows(master_df, df)
+    elif conflicts and force:
+        # Remove conflicting rows from master before merge
+        master_df = master_df[~master_df["ID"].isin(conflicts)]
+        
+    # 9. Find new rows - need to recalculate after conflict removal
+    new_ids = set(df["ID"]) - (set(master_df["ID"]) - set(conflicts))
+    new_rows = df[df["ID"].isin(new_ids)].copy()
 
     # 10. If nothing to merge, return summary
     if new_rows.empty:
@@ -417,7 +427,7 @@ async def upload_csv(
             }
         })
     
-    # If force=True, we proceed with the merge even if IDs are not sequential
+    # If force=True, we proceed with the merge even if IDs are not sequential or conflicting
 
     # 11. Add merge_timestamp and append to master
     timestamp = datetime.now().isoformat()
@@ -437,7 +447,7 @@ async def upload_csv(
         "message": f"Merged {len(new_rows)} new rows.",
         "diff": {
             "new": new_rows["ID"].tolist(),
-            "conflicts": [],
+            "conflicts": conflicts if conflicts else [],
             "deletions": list(missing_ids)
         }
     }

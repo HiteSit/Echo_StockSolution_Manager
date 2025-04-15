@@ -49,6 +49,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Initialize session state variables if not present
+if "awaiting_confirmation" not in st.session_state:
+    st.session_state.awaiting_confirmation = False
+if "upload_data" not in st.session_state:
+    st.session_state.upload_data = None
+if "confirmation_type" not in st.session_state:
+    st.session_state.confirmation_type = None
+
 
 def main() -> None:
     """Main application entry point."""
@@ -64,7 +72,9 @@ def main() -> None:
         st.markdown("### Actions")
         if st.button("Refresh Chemical Groups", key="refresh_btn"):
             st.cache_data.clear()
-            st.experimental_rerun()
+            st.session_state.awaiting_confirmation = False
+            st.session_state.upload_data = None
+            st.rerun()
     
     # Fetch chemical groups
     groups, group_error = get_chemical_groups()
@@ -77,6 +87,11 @@ def main() -> None:
     if not groups:
         st.warning("No chemical groups found. Please check backend configuration.")
         display_troubleshooting_info()
+        return
+    
+    # Check if we're waiting for confirmation
+    if st.session_state.awaiting_confirmation and st.session_state.upload_data:
+        display_confirmation_dialog(st.session_state.upload_data)
         return
     
     # Main workflow area
@@ -130,6 +145,60 @@ def main() -> None:
         
         Please ensure your data meets these requirements before uploading.
         """)
+
+
+def display_confirmation_dialog(upload_data: Dict) -> None:
+    """Display confirmation dialog for non-sequential IDs or conflicts.
+    
+    Args:
+        upload_data: Dictionary containing file, group, and warning details
+    """
+    st.markdown("<h2 class='subheader'>Confirmation Required</h2>", unsafe_allow_html=True)
+    
+    file = upload_data["file"]
+    chemical_group = upload_data["group"]
+    confirmation_type = st.session_state.confirmation_type
+    
+    if confirmation_type == "non_sequential":
+        # Non-sequential ID confirmation
+        last_id = upload_data.get("last_id", "Unknown")
+        new_ids = upload_data.get("new_ids", [])
+        
+        st.warning(f"⚠️ New IDs are not sequential with existing IDs. Last ID in master: {last_id}")
+        
+        if new_ids:
+            st.info(f"New IDs to be added: **{', '.join(map(str, new_ids[:10]))}**")
+            if len(new_ids) > 10:
+                st.info(f"...and {len(new_ids) - 10} more new IDs")
+    elif confirmation_type == "conflict":
+        # Conflict confirmation
+        conflicts = upload_data.get("conflicts", [])
+        
+        st.warning(f"⚠️ Conflicting IDs found. These entries will be overwritten if you proceed.")
+        
+        if conflicts:
+            st.info(f"Conflicting IDs: **{', '.join(map(str, conflicts[:10]))}**")
+            if len(conflicts) > 10:
+                st.info(f"...and {len(conflicts) - 10} more conflicts")
+    
+    # Add confirmation buttons
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✅ Yes, proceed with merge", key="confirm_btn", type="primary"):
+            # Execute the confirm merge
+            confirm_merge(file, chemical_group, True)
+            
+            # Reset confirmation state
+            st.session_state.awaiting_confirmation = False
+            st.session_state.upload_data = None
+            
+    with col2:
+        if st.button("❌ No, cancel merge", key="cancel_btn"):
+            st.info("Merge cancelled. You can fix the issues and upload again.")
+            
+            # Reset confirmation state
+            st.session_state.awaiting_confirmation = False
+            st.session_state.upload_data = None
 
 
 @st.cache_data(show_spinner=False, ttl=60)
@@ -215,27 +284,22 @@ def process_file_upload(file: Any, chemical_group: str) -> None:
                 logger.warning(f"Upload warning: {detail} (Type: {warning_type})")
                 
                 if warning_type == "non_sequential_ids":
-                    # Display warning and confirmation
+                    # Store data for confirmation
                     last_id = result.get('last_id', 'Unknown')
                     new_ids = result.get('diff', {}).get('new', [])
                     
-                    st.warning(f"⚠️ {detail}")
-                    st.info(f"Last ID in master: **{last_id}**")
+                    # Save in session state for confirmation
+                    st.session_state.awaiting_confirmation = True
+                    st.session_state.confirmation_type = "non_sequential"
+                    st.session_state.upload_data = {
+                        "file": file,
+                        "group": chemical_group,
+                        "last_id": last_id,
+                        "new_ids": new_ids
+                    }
                     
-                    if new_ids:
-                        st.info(f"New IDs to be added: **{', '.join(map(str, new_ids[:10]))}**")
-                        if len(new_ids) > 10:
-                            st.info(f"...and {len(new_ids) - 10} more new IDs")
-                    
-                    # Create confirmation dialog
-                    confirm_col1, confirm_col2 = st.columns(2)
-                    with confirm_col1:
-                        if st.button("✅ Yes, proceed with merge", key="confirm_merge_btn", type="primary"):
-                            # Send confirmation request
-                            confirm_merge(file, chemical_group, True)
-                    with confirm_col2:
-                        if st.button("❌ No, cancel merge", key="cancel_merge_btn"):
-                            st.info("Merge cancelled. You can fix the IDs and upload again.")
+                    # Force rerun to show confirmation dialog
+                    st.rerun()
                             
             else:
                 # Handle error response
@@ -256,9 +320,17 @@ def process_file_upload(file: Any, chemical_group: str) -> None:
                 if error_type == "conflict" and "diff" in response_json:
                     conflicts = response_json["diff"].get("conflicts", [])
                     if conflicts:
-                        st.warning(f"Conflicting IDs: {', '.join(map(str, conflicts[:10]))}")
-                        if len(conflicts) > 10:
-                            st.warning(f"...and {len(conflicts) - 10} more conflicts")
+                        # Store data for confirmation
+                        st.session_state.awaiting_confirmation = True
+                        st.session_state.confirmation_type = "conflict"
+                        st.session_state.upload_data = {
+                            "file": file,
+                            "group": chemical_group,
+                            "conflicts": conflicts
+                        }
+                        
+                        # Force rerun to show confirmation dialog
+                        st.rerun()
         except requests.RequestException as e:
             logger.error(f"Connection error during upload: {str(e)}")
             st.error(f"Connection error: {str(e)}")
@@ -328,6 +400,7 @@ def display_upload_results(result: Dict[str, Any]) -> None:
     """
     diff = result.get("diff", {})
     new_ids = diff.get("new", [])
+    conflicts = diff.get("conflicts", [])
     missing_ids = diff.get("deletions", [])
     
     if new_ids:
@@ -339,6 +412,11 @@ def display_upload_results(result: Dict[str, Any]) -> None:
             st.code(', '.join(map(str, new_ids[:10])) + f"... and {len(new_ids) - 10} more")
     else:
         st.info("No new entries were added")
+    
+    if conflicts:
+        st.info(f"Overwrote {len(conflicts)} conflicting entries")
+        if len(conflicts) <= 5:
+            st.code(', '.join(map(str, conflicts)))
     
     if missing_ids:
         st.info(f"This was a partial upload. There are {len(missing_ids)} IDs in the master file that were not in this upload.")
