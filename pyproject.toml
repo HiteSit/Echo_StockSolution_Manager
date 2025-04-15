@@ -1,7 +1,7 @@
 [project]
-name = "web-application"
+name = "Echo_StockSolution_Manager"
 version = "0.1.0"
-description = "Add your description here"
+description = "Chemical Groups Management System"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
