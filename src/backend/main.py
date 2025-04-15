@@ -153,23 +153,19 @@ def validate_ids_and_type(df: pd.DataFrame, group: str) -> None:
         )
 
 
-def check_no_deletions(master_df: pd.DataFrame, upload_df: pd.DataFrame) -> None:
+def check_for_missing_ids(master_df: pd.DataFrame, upload_df: pd.DataFrame) -> Set[str]:
     """
-    Ensure no deletions occurred: all master IDs must be present in upload.
+    Check for missing IDs (IDs in master but not in upload).
+    This is now informational rather than an error.
     
     Args:
         master_df: DataFrame containing existing master data
         upload_df: DataFrame containing uploaded data
         
-    Raises:
-        HTTPException: If any IDs are missing from upload
+    Returns:
+        Set[str]: Set of IDs present in master but not in upload
     """
-    missing_ids = set(master_df["ID"]) - set(upload_df["ID"])
-    if missing_ids:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Upload is missing IDs present in master: {sorted(missing_ids)}"
-        )
+    return set(master_df["ID"]) - set(upload_df["ID"])
 
 
 def find_conflicts(master_df: pd.DataFrame, upload_df: pd.DataFrame) -> List[str]:
@@ -227,6 +223,55 @@ def get_new_rows(master_df: pd.DataFrame, upload_df: pd.DataFrame) -> pd.DataFra
     return upload_df[upload_df["ID"].isin(new_ids)].copy()
 
 
+def check_sequential_ids(master_df: pd.DataFrame, new_rows: pd.DataFrame, group: str) -> dict:
+    """
+    Check if new IDs are sequential with the existing IDs in the master file.
+    
+    Args:
+        master_df: DataFrame containing existing master data
+        new_rows: DataFrame containing new rows to be added
+        group: Chemical group name
+        
+    Returns:
+        dict: Dictionary with keys 'sequential' (bool) and 'last_id' (str)
+    """
+    # If master is empty or no new rows, sequential by default
+    if master_df.empty or new_rows.empty:
+        return {"sequential": True, "last_id": None}
+    
+    # Determine ID prefix from group name
+    id_prefix = group[:-1] if group.endswith("s") else group
+    
+    # Extract numbers from IDs using regex
+    id_pattern = re.compile(rf"^{id_prefix}_(\d+)$")
+    
+    # Function to extract number from ID
+    def extract_number(id_str):
+        match = id_pattern.match(str(id_str))
+        if match:
+            return int(match.group(1))
+        return None
+    
+    # Get all numeric parts of IDs
+    master_numbers = [extract_number(id_val) for id_val in master_df["ID"] if extract_number(id_val) is not None]
+    new_numbers = [extract_number(id_val) for id_val in new_rows["ID"] if extract_number(id_val) is not None]
+    
+    if not master_numbers or not new_numbers:
+        return {"sequential": True, "last_id": None}
+    
+    # Find the highest ID in master
+    highest_master = max(master_numbers)
+    # Find the lowest ID in new rows
+    lowest_new = min(new_numbers)
+    
+    # Check if sequential (lowest new should be highest master + 1)
+    last_id = f"{id_prefix}_{highest_master}"
+    return {
+        "sequential": lowest_new == highest_master + 1,
+        "last_id": last_id
+    }
+
+
 def append_merge_history(new_rows: pd.DataFrame, timestamp: str, chemical_group: str) -> None:
     """
     Append a summary row to merge_history.csv with details about the merge operation.
@@ -275,7 +320,8 @@ async def get_chemical_groups() -> Dict[str, List[str]]:
 @app.post("/upload_csv", response_model=UploadResponse)
 async def upload_csv(
     file: UploadFile = File(...),
-    chemical_group: str = Query(..., description="Chemical group to upload to (case-sensitive)")
+    chemical_group: str = Query(..., description="Chemical group to upload to (case-sensitive)"),
+    force: bool = Query(False, description="Force merge even with non-sequential IDs")
 ) -> Dict[str, Any]:
     """
     Upload a CSV for a specific chemical group, validate, compare with existing data,
@@ -307,7 +353,11 @@ async def upload_csv(
     
     # 3. Read and validate CSV content
     try:
-        df = pd.read_csv(file.file)
+        # Read the file content into memory so we can reuse it
+        file_content = file.file.read()
+        # Create a BytesIO object from the content for pandas to read
+        import io
+        df = pd.read_csv(io.BytesIO(file_content))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid CSV: {e}")
 
@@ -324,8 +374,8 @@ async def upload_csv(
     else:
         master_df = pd.DataFrame(columns=REFERENCE_COLUMNS)
 
-    # 7. Assert no deletions
-    check_no_deletions(master_df, df)
+    # 7. Check for missing IDs (for information only, not an error)
+    missing_ids = check_for_missing_ids(master_df, df)
 
     # 8. Find conflicts
     conflicts = find_conflicts(master_df, df)
@@ -345,8 +395,29 @@ async def upload_csv(
         return {
             "status": "ok", 
             "message": "No new rows to merge.", 
-            "diff": {"new": [], "conflicts": [], "deletions": []}
+            "diff": {"new": [], "conflicts": [], "deletions": list(missing_ids)}
         }
+        
+    # 10.1 Check if IDs are sequential
+    sequence_check = check_sequential_ids(master_df, new_rows, chemical_group)
+    sequential = sequence_check["sequential"]
+    last_id = sequence_check["last_id"]
+    
+    # 10.2 Return warning if not sequential and not forced
+    if not sequential and not force:
+        return JSONResponse(status_code=202, content={
+            "status": "warning",
+            "warning_type": "non_sequential_ids",
+            "detail": f"New IDs are not sequential with existing IDs. Last ID in master: {last_id}",
+            "last_id": last_id,
+            "diff": {
+                "new": new_rows["ID"].tolist(),
+                "conflicts": [],
+                "deletions": list(missing_ids)
+            }
+        })
+    
+    # If force=True, we proceed with the merge even if IDs are not sequential
 
     # 11. Add merge_timestamp and append to master
     timestamp = datetime.now().isoformat()
@@ -367,7 +438,7 @@ async def upload_csv(
         "diff": {
             "new": new_rows["ID"].tolist(),
             "conflicts": [],
-            "deletions": []
+            "deletions": list(missing_ids)
         }
     }
 

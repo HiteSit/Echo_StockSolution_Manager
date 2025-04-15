@@ -197,6 +197,7 @@ def process_file_upload(file: Any, chemical_group: str) -> None:
             
             # Process the response
             if response.status_code == 200:
+                # Standard successful response
                 result = response.json()
                 logger.info(f"Upload successful: {result.get('message')}")
                 
@@ -205,6 +206,37 @@ def process_file_upload(file: Any, chemical_group: str) -> None:
                 
                 # Display results details
                 display_upload_results(result)
+                
+            elif response.status_code == 202:
+                # Warning response (non-sequential IDs)
+                result = response.json()
+                warning_type = result.get('warning_type')
+                detail = result.get('detail')
+                logger.warning(f"Upload warning: {detail} (Type: {warning_type})")
+                
+                if warning_type == "non_sequential_ids":
+                    # Display warning and confirmation
+                    last_id = result.get('last_id', 'Unknown')
+                    new_ids = result.get('diff', {}).get('new', [])
+                    
+                    st.warning(f"⚠️ {detail}")
+                    st.info(f"Last ID in master: **{last_id}**")
+                    
+                    if new_ids:
+                        st.info(f"New IDs to be added: **{', '.join(map(str, new_ids[:10]))}**")
+                        if len(new_ids) > 10:
+                            st.info(f"...and {len(new_ids) - 10} more new IDs")
+                    
+                    # Create confirmation dialog
+                    confirm_col1, confirm_col2 = st.columns(2)
+                    with confirm_col1:
+                        if st.button("✅ Yes, proceed with merge", key="confirm_merge_btn", type="primary"):
+                            # Send confirmation request
+                            confirm_merge(file, chemical_group, True)
+                    with confirm_col2:
+                        if st.button("❌ No, cancel merge", key="cancel_merge_btn"):
+                            st.info("Merge cancelled. You can fix the IDs and upload again.")
+                            
             else:
                 # Handle error response
                 try:
@@ -227,12 +259,64 @@ def process_file_upload(file: Any, chemical_group: str) -> None:
                         st.warning(f"Conflicting IDs: {', '.join(map(str, conflicts[:10]))}")
                         if len(conflicts) > 10:
                             st.warning(f"...and {len(conflicts) - 10} more conflicts")
-        
         except requests.RequestException as e:
             logger.error(f"Connection error during upload: {str(e)}")
             st.error(f"Connection error: {str(e)}")
         except Exception as e:
             logger.error(f"Unexpected error during upload: {str(e)}")
+            st.error(f"Error: {str(e)}")
+
+
+def confirm_merge(file: Any, chemical_group: str, force: bool) -> None:
+    """Confirm the merge operation after warning about non-sequential IDs.
+    
+    Args:
+        file: The uploaded file object
+        chemical_group: Selected chemical group name
+        force: Whether to force the merge despite warnings
+    """
+    with st.spinner("Processing confirmed merge..."):
+        try:
+            # Reset the file position to the beginning to reuse it
+            file.seek(0)
+            
+            # Prepare the file upload with force parameter
+            files = {"file": (file.name, file, "text/csv")}
+            params = {"chemical_group": chemical_group, "force": force}
+            
+            # Send request to backend
+            logger.info(f"Confirming upload for chemical group: {chemical_group} with force={force}")
+            response = requests.post(
+                f"{BACKEND}/upload_csv",
+                files=files, 
+                params=params,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"Confirmed upload successful: {result.get('message')}")
+                
+                # Show success message with details
+                st.success("✅ Upload and merge successful!")
+                
+                # Display results details
+                display_upload_results(result)
+            else:
+                # Handle error response
+                try:
+                    response_json = response.json()
+                    detail = response_json.get('detail') or str(response_json)
+                except ValueError:
+                    detail = f"Invalid response (HTTP {response.status_code})"
+                
+                logger.error(f"Confirmed upload failed: {detail}")
+                st.error(f"Upload failed: {detail}")
+        except requests.RequestException as e:
+            logger.error(f"Connection error during confirmation: {str(e)}")
+            st.error(f"Connection error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during confirmation: {str(e)}")
             st.error(f"Error: {str(e)}")
 
 
@@ -244,6 +328,7 @@ def display_upload_results(result: Dict[str, Any]) -> None:
     """
     diff = result.get("diff", {})
     new_ids = diff.get("new", [])
+    missing_ids = diff.get("deletions", [])
     
     if new_ids:
         st.info(f"Added {len(new_ids)} new entries")
@@ -254,6 +339,12 @@ def display_upload_results(result: Dict[str, Any]) -> None:
             st.code(', '.join(map(str, new_ids[:10])) + f"... and {len(new_ids) - 10} more")
     else:
         st.info("No new entries were added")
+    
+    if missing_ids:
+        st.info(f"This was a partial upload. There are {len(missing_ids)} IDs in the master file that were not in this upload.")
+        if len(missing_ids) <= 5:
+            missing_list = ', '.join(map(str, missing_ids))
+            st.info(f"Missing IDs: {missing_list}")
 
 
 def display_troubleshooting_info() -> None:
