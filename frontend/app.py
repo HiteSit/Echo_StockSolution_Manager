@@ -5,7 +5,7 @@ with validation and integration with the backend API.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 
 import requests
 import streamlit as st
@@ -173,7 +173,7 @@ def check_backend_status() -> None:
         st.error("Backend: Unreachable (Connection Failed)")
 
 
-def process_file_upload(file, chemical_group: str) -> None:
+def process_file_upload(file: Any, chemical_group: str) -> None:
     """Process the file upload to the backend.
     
     Args:
@@ -207,9 +207,15 @@ def process_file_upload(file, chemical_group: str) -> None:
                 display_upload_results(result)
             else:
                 # Handle error response
-                response_json = response.json()
-                detail = response_json.get('detail') or str(response_json)
-                error_type = response_json.get('error_type', 'validation_error')
+                try:
+                    response_json = response.json()
+                    detail = response_json.get('detail') or str(response_json)
+                    error_type = response_json.get('error_type', 'validation_error')
+                except ValueError:
+                    # Handle case when response is not valid JSON
+                    detail = f"Invalid response (HTTP {response.status_code})"
+                    error_type = "server_error"
+                    logger.error(f"Response was not valid JSON: {response.text[:100]}")
                 
                 logger.error(f"Upload failed: {detail} (Type: {error_type})")
                 st.error(f"Upload failed: {detail}")
@@ -230,7 +236,7 @@ def process_file_upload(file, chemical_group: str) -> None:
             st.error(f"Error: {str(e)}")
 
 
-def display_upload_results(result: Dict) -> None:
+def display_upload_results(result: Dict[str, Any]) -> None:
     """Display detailed upload results.
     
     Args:
