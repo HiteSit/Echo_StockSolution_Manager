@@ -1,13 +1,8 @@
-INFO:     Started server process [10922]
+INFO:     Started server process [15413]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:58308 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58314 - "GET /chemical_groups HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51198 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51214 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51228 - "POST /upload_csv?chemical_group=Amines HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36970 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36982 - "GET /chemical_groups HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36998 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37004 - "POST /upload_csv?chemical_group=Amines HTTP/1.1" 400 Bad Request
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [15413]

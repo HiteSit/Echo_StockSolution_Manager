@@ -192,25 +192,6 @@ trap cleanup EXIT
 # Main script execution
 echo -e "\n${BOLD}Chemical Groups Web Application Launcher${RESET}\n"
 
-# Check for arguments
-if [ "$1" == "stop" ]; then
-    # Stop any running services
-    stop_services
-    exit 0
-elif [ "$1" == "restart" ]; then
-    # Restart services (stop and then start)
-    stop_services
-    # Continue with startup (fallthrough)
-elif [[ "$1" == --backend-port=* ]]; then
-    # Set custom backend port
-    BACKEND_PORT=${1#*=}
-    shift
-elif [[ "$1" == --frontend-port=* ]]; then
-    # Set custom frontend port
-    FRONTEND_PORT=${1#*=}
-    shift
-fi
-
 # Function to stop any running services
 stop_services() {
     # First try to use PID file
@@ -247,6 +228,26 @@ stop_services() {
         log_success "Services stopped or were not running"
     fi
 }
+
+# Check for arguments
+if [ "$1" == "stop" ]; then
+    # Stop any running services
+    stop_services
+    exit 0
+elif [ "$1" == "restart" ]; then
+    # Restart services (stop and then start)
+    stop_services
+    # Continue with startup (fallthrough)
+elif [[ "$1" == --backend-port=* ]]; then
+    # Set custom backend port
+    BACKEND_PORT=${1#*=}
+    shift
+elif [[ "$1" == --frontend-port=* ]]; then
+    # Set custom frontend port
+    FRONTEND_PORT=${1#*=}
+    shift
+fi
+
 
 # Stop any existing services first
 log_info "Checking for existing services..."

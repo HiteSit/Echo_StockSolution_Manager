@@ -4,11 +4,4 @@
   Local URL: http://localhost:8501
   Network URL: http://172.25.191.149:8501
 
-2025-04-15 11:16:23,279 - __main__ - INFO - Fetching chemical groups from backend
-2025-04-15 11:16:23,293 - __main__ - INFO - Successfully retrieved 3 chemical groups
-2025-04-15 11:17:22,397 - __main__ - INFO - Uploading CSV file for chemical group: Amines
-2025-04-15 11:17:22,525 - __main__ - INFO - Upload successful: No new rows to merge.
-2025-04-15 11:17:43,437 - __main__ - INFO - Fetching chemical groups from backend
-2025-04-15 11:17:43,448 - __main__ - INFO - Successfully retrieved 3 chemical groups
-2025-04-15 11:17:44,501 - __main__ - INFO - Uploading CSV file for chemical group: Amines
-2025-04-15 11:17:44,512 - __main__ - ERROR - Upload failed: Duplicate IDs found in uploaded file. (Type: validation_error)
+  Stopping...
