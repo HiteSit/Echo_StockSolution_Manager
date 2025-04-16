@@ -46,6 +46,41 @@ check_port() {
     return 1  # Port is not in use
 }
 
+# Function to kill a process using a specific port
+kill_process_on_port() {
+    local port=$1
+    local pid=""
+    
+    # Try to find PID using lsof
+    if command -v lsof &> /dev/null; then
+        pid=$(lsof -ti:"$port" 2>/dev/null)
+    # If lsof failed or isn't available, try netstat
+    elif command -v netstat &> /dev/null; then
+        pid=$(netstat -tulpn 2>/dev/null | grep ":$port " | awk '{print $7}' | cut -d'/' -f1)
+    fi
+    
+    # If we found a PID, try to kill it
+    if [ -n "$pid" ]; then
+        log_warn "Killing process $pid that is using port $port"
+        kill $pid 2>/dev/null
+        
+        # Wait briefly to ensure the process is terminated
+        sleep 1
+        
+        # Check if the port is now available
+        if ! check_port "$port"; then
+            log_success "Successfully freed port $port"
+            return 0  # Successfully killed process
+        else
+            log_error "Failed to free port $port, process may still be running"
+        fi
+    else
+        log_error "Could not identify process using port $port"
+    fi
+    
+    return 1  # Failed to kill process or free port
+}
+
 # Function to find next available port starting from given port
 find_available_port() {
     local start_port=$1
@@ -75,28 +110,44 @@ check_prerequisites() {
         exit 1
     fi
     
-    # Check if required ports are available, if not find alternatives
+    # Check if required ports are available, if not kill processes on those ports
     if check_port "$BACKEND_PORT"; then
         log_warn "Port $BACKEND_PORT is already in use for backend."
-        local new_port=$(find_available_port $((BACKEND_PORT+1)))
-        if [ $? -eq 0 ]; then
-            log_info "Switching to available port $new_port for backend."
-            BACKEND_PORT=$new_port
+        
+        # Try to kill the process using this port
+        if kill_process_on_port "$BACKEND_PORT"; then
+            log_info "Will use the original port $BACKEND_PORT for backend."
         else
-            log_error "Could not find an available port for backend."
-            exit 1
+            # Fallback: find an alternative port if we couldn't kill the process
+            log_warn "Could not kill process on port $BACKEND_PORT. Finding alternative port..."
+            local new_port=$(find_available_port $((BACKEND_PORT+1)))
+            if [ $? -eq 0 ]; then
+                log_info "Switching to available port $new_port for backend."
+                BACKEND_PORT=$new_port
+            else
+                log_error "Could not find an available port for backend."
+                exit 1
+            fi
         fi
     fi
     
     if check_port "$FRONTEND_PORT"; then
         log_warn "Port $FRONTEND_PORT is already in use for frontend."
-        local new_port=$(find_available_port $((FRONTEND_PORT+1)))
-        if [ $? -eq 0 ]; then
-            log_info "Switching to available port $new_port for frontend."
-            FRONTEND_PORT=$new_port
+        
+        # Try to kill the process using this port
+        if kill_process_on_port "$FRONTEND_PORT"; then
+            log_info "Will use the original port $FRONTEND_PORT for frontend."
         else
-            log_error "Could not find an available port for frontend."
-            exit 1
+            # Fallback: find an alternative port if we couldn't kill the process
+            log_warn "Could not kill process on port $FRONTEND_PORT. Finding alternative port..."
+            local new_port=$(find_available_port $((FRONTEND_PORT+1)))
+            if [ $? -eq 0 ]; then
+                log_info "Switching to available port $new_port for frontend."
+                FRONTEND_PORT=$new_port
+            else
+                log_error "Could not find an available port for frontend."
+                exit 1
+            fi
         fi
     fi
     
