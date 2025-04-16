@@ -23,7 +23,7 @@ from rdkit import Chem
 import datamol as dm
 
 # Import authentication module
-from auth import check_authentication
+from auth import check_authentication, load_user_credentials
 
 # Configure logging
 logging.basicConfig(
@@ -323,7 +323,20 @@ def process_file_upload(file: Any, chemical_group: str) -> None:
         try:
             # Prepare the file upload
             files = {"file": (file.name, file, "text/csv")}
-            params = {"chemical_group": chemical_group}
+            
+            # Get the user's full name from session state
+            user_fullname = None
+            if "username" in st.session_state:
+                username = st.session_state["username"]
+                user_credentials = load_user_credentials()
+                if user_credentials and username in user_credentials["credentials"]["usernames"]:
+                    user_fullname = user_credentials["credentials"]["usernames"][username]["name"]
+            
+            # Add the user's name to the request parameters
+            params = {
+                "chemical_group": chemical_group,
+                "uploader_name": user_fullname
+            }
             
             # Send request to backend
             logger.info(f"Uploading CSV file for chemical group: {chemical_group}")
@@ -365,7 +378,8 @@ def process_file_upload(file: Any, chemical_group: str) -> None:
                         "file": file,
                         "group": chemical_group,
                         "last_id": last_id,
-                        "new_ids": new_ids
+                        "new_ids": new_ids,
+                        "uploader_name": user_fullname
                     }
                     
                     # Force rerun to show confirmation dialog
@@ -396,7 +410,8 @@ def process_file_upload(file: Any, chemical_group: str) -> None:
                         st.session_state.upload_data = {
                             "file": file,
                             "group": chemical_group,
-                            "conflicts": conflicts
+                            "conflicts": conflicts,
+                            "uploader_name": user_fullname
                         }
                         
                         # Force rerun to show confirmation dialog
@@ -422,9 +437,23 @@ def confirm_merge(file: Any, chemical_group: str, force: bool) -> None:
             # Reset the file position to the beginning to reuse it
             file.seek(0)
             
+            # Get the user's full name from session state
+            user_fullname = None
+            if "upload_data" in st.session_state and "uploader_name" in st.session_state.upload_data:
+                user_fullname = st.session_state.upload_data["uploader_name"]
+            elif "username" in st.session_state:
+                username = st.session_state["username"]
+                user_credentials = load_user_credentials()
+                if user_credentials and username in user_credentials["credentials"]["usernames"]:
+                    user_fullname = user_credentials["credentials"]["usernames"][username]["name"]
+            
             # Prepare the file upload with force parameter
             files = {"file": (file.name, file, "text/csv")}
-            params = {"chemical_group": chemical_group, "force": force}
+            params = {
+                "chemical_group": chemical_group, 
+                "force": force,
+                "uploader_name": user_fullname
+            }
             
             # Send request to backend
             logger.info(f"Confirming upload for chemical group: {chemical_group} with force={force}")

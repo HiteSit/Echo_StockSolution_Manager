@@ -348,7 +348,7 @@ def check_sequential_ids(master_df: pd.DataFrame, new_rows: pd.DataFrame, group:
     }
 
 
-def append_merge_history(new_rows: pd.DataFrame, timestamp: str, chemical_group: str) -> None:
+def append_merge_history(new_rows: pd.DataFrame, timestamp: str, chemical_group: str, uploader_name: str = None) -> None:
     """
     Append merge history to a log file for tracking.
     
@@ -356,6 +356,7 @@ def append_merge_history(new_rows: pd.DataFrame, timestamp: str, chemical_group:
         new_rows: DataFrame containing new rows that were merged
         timestamp: ISO format timestamp of the merge
         chemical_group: Name of the chemical group
+        uploader_name: Name of the user performing the upload
     """
     history_file = os.path.join(DATA_DIR, "merge_history.csv")
     
@@ -364,7 +365,8 @@ def append_merge_history(new_rows: pd.DataFrame, timestamp: str, chemical_group:
         "timestamp": timestamp,
         "chemical_group": chemical_group,
         "num_rows": len(new_rows),
-        "ids": ";".join(new_rows["ID"].astype(str).tolist())
+        "ids": ";".join(new_rows["ID"].astype(str).tolist()),
+        "uploaded_by": uploader_name if uploader_name else "Unknown"
     }
     
     # Create or append to history file
@@ -503,7 +505,8 @@ async def get_chemical_groups() -> Dict[str, List[str]]:
 async def upload_csv(
     file: UploadFile = File(...),
     chemical_group: str = Query(..., description="Chemical group to upload to (case-sensitive)"),
-    force: bool = Query(False, description="Force merge even with non-sequential IDs or conflicts")
+    force: bool = Query(False, description="Force merge even with non-sequential IDs or conflicts"),
+    uploader_name: str = Query(None, description="Name of the user who is uploading the file")
 ) -> Dict[str, Any]:
     """
     Upload a CSV for a specific chemical group, validate, compare with existing data,
@@ -513,6 +516,7 @@ async def upload_csv(
         file: Uploaded CSV file
         chemical_group: Name of the chemical group to upload to
         force: Whether to force the merge despite warnings or conflicts
+        uploader_name: Name of the user performing the upload
         
     Returns:
         Dict containing status, message, and diff summary
@@ -615,6 +619,13 @@ async def upload_csv(
     timestamp = datetime.now().isoformat()
     new_rows_with_volumes["merge_timestamp"] = timestamp
     
+    # Add uploader name to new rows
+    new_rows_with_volumes["uploaded_by"] = uploader_name if uploader_name else "Unknown"
+    
+    # Ensure master dataframe has uploaded_by column
+    if "uploaded_by" not in master_df.columns:
+        master_df["uploaded_by"] = None
+        
     if "merge_timestamp" not in master_df.columns:
         master_df["merge_timestamp"] = None
         
@@ -622,7 +633,7 @@ async def upload_csv(
     merged_df.to_csv(master_csv, index=False)
 
     # 12. Log merge history
-    append_merge_history(new_rows_with_volumes, timestamp, chemical_group)
+    append_merge_history(new_rows_with_volumes, timestamp, chemical_group, uploader_name)
 
     return {
         "status": "ok",
