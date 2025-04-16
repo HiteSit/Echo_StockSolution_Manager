@@ -649,12 +649,13 @@ async def upload_csv(
     # 5.2 Check for duplicate InChI values within the upload itself
     upload_duplicates = check_duplicate_inchi(df)
     if upload_duplicates and not force:
-        duplicate_details = []
-        for inchi, ids in upload_duplicates:
-            duplicate_details.append(f"InChI {inchi[:30]}... has duplicate IDs: {', '.join(ids)}")
+        # Collect all duplicated IDs
+        all_duplicate_ids = []
+        for _, ids in upload_duplicates:
+            all_duplicate_ids.extend(ids)
         raise HTTPException(
             status_code=400, 
-            detail=f"Duplicate compounds found in upload: {'; '.join(duplicate_details)}"
+            detail=f"Duplicate compounds found in upload: {', '.join(all_duplicate_ids)}"
         )
 
     # 6. Load master for group
@@ -685,15 +686,16 @@ async def upload_csv(
                 new_duplicates.append((inchi, master_ids, upload_ids))
         
         if new_duplicates and not force:
-            duplicate_details = []
-            for inchi, master_ids, upload_ids in new_duplicates:
-                duplicate_details.append(
-                    f"InChI {inchi[:30]}... in upload IDs {', '.join(upload_ids)} "
-                    f"matches existing IDs {', '.join(master_ids)}"
-                )
+            # Collect all duplicated IDs
+            all_master_ids = []
+            all_upload_ids = []
+            for _, master_ids, upload_ids in new_duplicates:
+                all_master_ids.extend(master_ids)
+                all_upload_ids.extend(upload_ids)
+            
             raise HTTPException(
                 status_code=400,
-                detail=f"Cross-file duplicate compounds found: {'; '.join(duplicate_details)}"
+                detail=f"Cross-file duplicate compounds. Upload IDs: {', '.join(all_upload_ids)}, Master IDs: {', '.join(all_master_ids)}"
             )
     else:
         master_df = pd.DataFrame(columns=REFERENCE_COLUMNS)
