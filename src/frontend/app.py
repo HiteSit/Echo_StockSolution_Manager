@@ -14,6 +14,7 @@ import seaborn as sns
 import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, List, Optional, Tuple, Union, Any
+from datetime import datetime
 
 import requests
 import streamlit as st
@@ -97,10 +98,13 @@ def main() -> None:
             check_backend_status()
             
             st.markdown("### Actions")
-            if st.button("Refresh Chemical Groups", key="refresh_btn"):
+            if st.button("Refresh Data", key="refresh_btn"):
                 st.cache_data.clear()
+                # Clear session state for visualization dashboard
                 st.session_state.awaiting_confirmation = False
                 st.session_state.upload_data = None
+                st.session_state.current_df = None
+                st.session_state.filtered_df = None
                 st.rerun()
         
         # Header section
@@ -528,8 +532,6 @@ def display_data_visualization_dashboard() -> None:
     st.markdown("<h2 class='subheader'>Data Visualization Dashboard</h2>", unsafe_allow_html=True)
     
     # Initialize session state for visualizer if needed
-    if "selected_file" not in st.session_state:
-        st.session_state.selected_file = None
     if "current_df" not in st.session_state:
         st.session_state.current_df = None
     if "filtered_df" not in st.session_state:
@@ -541,37 +543,28 @@ def display_data_visualization_dashboard() -> None:
         st.warning("No master CSV files found in the data directory.")
         return
     
-    # Format file names for display (remove path and extension)
-    file_display_names = [os.path.basename(f).replace("master_", "").replace(".csv", "") for f in master_csv_files]
-    file_mapping = dict(zip(file_display_names, master_csv_files))
+    # Load and combine all master CSV files
+    combined_df = None
+    for file_path in master_csv_files:
+        try:
+            temp_df = pd.read_csv(file_path)
+            if combined_df is None:
+                combined_df = temp_df
+            else:
+                combined_df = pd.concat([combined_df, temp_df], ignore_index=True)
+        except Exception as e:
+            st.error(f"Error loading file {file_path}: {str(e)}")
     
-    # File selection
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        selected_file_name = st.selectbox(
-            "Select Chemical Group Data",
-            options=file_display_names,
-            key="viz_file_select"
-        )
-        
-        if selected_file_name:
-            file_path = file_mapping[selected_file_name]
-            
-            # Load the file if it's different from the currently loaded one
-            if st.session_state.selected_file != file_path:
-                try:
-                    df = pd.read_csv(file_path)
-                    st.session_state.current_df = df
-                    st.session_state.filtered_df = df
-                    st.session_state.selected_file = file_path
-                except Exception as e:
-                    st.error(f"Error loading file: {str(e)}")
-                    return
-    
-    # If no dataframe is loaded, return
-    if st.session_state.current_df is None:
+    if combined_df is None or combined_df.empty:
+        st.error("Failed to load any data from master CSV files.")
         return
+    
+    # Store combined DataFrame in session state
+    st.session_state.current_df = combined_df
+    
+    # Initialize filtered DataFrame if not already set
+    if st.session_state.filtered_df is None:
+        st.session_state.filtered_df = combined_df
     
     # Get current dataframe
     df = st.session_state.current_df
@@ -616,105 +609,42 @@ def display_data_explorer(df: pd.DataFrame) -> None:
         # Dynamic filtering based on column types
         st.markdown("#### Advanced Filters")
         
-        # Create filter columns - adjust based on number of filters
+        # Put Type, Box and SMARTS on the same line
         filter_cols = st.columns(3)
-        col_idx = 0
         
-        # Type filter (categorical)
+        # Type filter (categorical) - first column
         if 'Type' in df.columns:
-            with filter_cols[col_idx % 3]:
+            with filter_cols[0]:
                 unique_types = sorted(df['Type'].unique().tolist())
+                st.markdown("**Filter by Type**")
                 selected_types = st.multiselect(
-                    "Filter by Type",
+                    "Select one or more chemical types",
                     options=unique_types,
                     default=unique_types,
                     key="type_filter"
                 )
                 if selected_types and len(selected_types) < len(unique_types):
                     filtered_df = filtered_df[filtered_df['Type'].isin(selected_types)]
-            col_idx += 1
         
-        # Box filter (categorical if present)
+        # Box filter - second column
         if 'Box' in df.columns:
-            with filter_cols[col_idx % 3]:
+            with filter_cols[1]:
                 unique_boxes = sorted(df['Box'].dropna().unique().tolist())
-                if len(unique_boxes) > 0 and len(unique_boxes) <= 20:  # Only show if reasonable number of values
+                st.markdown("**Filter by Box**")
+                if len(unique_boxes) > 0:
                     selected_boxes = st.multiselect(
-                        "Filter by Box",
+                        "Select box",
                         options=unique_boxes,
                         default=unique_boxes,
                         key="box_filter"
                     )
                     if selected_boxes and len(selected_boxes) < len(unique_boxes):
                         filtered_df = filtered_df[filtered_df['Box'].isin(selected_boxes)]
-            col_idx += 1
         
-        # Numerical range filters (for numeric columns)
-        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
-        
-        # Mass filter
-        if 'Mass (mg)' in numeric_cols:
-            with filter_cols[col_idx % 3]:
-                min_val = float(df['Mass (mg)'].min())
-                max_val = float(df['Mass (mg)'].max())
-                if min_val < max_val:
-                    mass_range = st.slider(
-                        "Mass Range (mg)",
-                        min_value=min_val,
-                        max_value=max_val,
-                        value=(min_val, max_val),
-                        key="mass_filter"
-                    )
-                    filtered_df = filtered_df[
-                        (filtered_df['Mass (mg)'] >= mass_range[0]) & 
-                        (filtered_df['Mass (mg)'] <= mass_range[1])
-                    ]
-            col_idx += 1
-        
-        # Concentration filter
-        if 'Conc (M)' in numeric_cols:
-            with filter_cols[col_idx % 3]:
-                min_val = float(df['Conc (M)'].min())
-                max_val = float(df['Conc (M)'].max())
-                if min_val < max_val:
-                    conc_range = st.slider(
-                        "Concentration Range (M)",
-                        min_value=min_val,
-                        max_value=max_val,
-                        value=(min_val, max_val),
-                        key="conc_filter"
-                    )
-                    filtered_df = filtered_df[
-                        (filtered_df['Conc (M)'] >= conc_range[0]) & 
-                        (filtered_df['Conc (M)'] <= conc_range[1])
-                    ]
-            col_idx += 1
-        
-        # Volume filter
-        if 'Volume (uL)' in numeric_cols:
-            with filter_cols[col_idx % 3]:
-                # Handle NaN values properly
-                vol_data = df['Volume (uL)'].dropna()
-                if not vol_data.empty:
-                    min_val = float(vol_data.min())
-                    max_val = float(vol_data.max())
-                    if min_val < max_val:
-                        vol_range = st.slider(
-                            "Volume Range (uL)",
-                            min_value=min_val,
-                            max_value=max_val,
-                            value=(min_val, max_val),
-                            key="vol_filter"
-                        )
-                        filtered_df = filtered_df[
-                            (filtered_df['Volume (uL)'].fillna(-1) >= vol_range[0]) & 
-                            (filtered_df['Volume (uL)'].fillna(float('inf')) <= vol_range[1])
-                        ]
-            col_idx += 1
-        
-        # Replace SMILES pattern filter with SMARTS pattern filter if Smiles column exists
+        # SMARTS pattern filter - third column
         if 'Smiles' in df.columns:
-            with filter_cols[col_idx % 3]:
+            with filter_cols[2]:
+                st.markdown("**SMARTS Pattern**")
                 # Create text input for SMARTS pattern
                 smarts_pattern = st.text_input(
                     "SMARTS Pattern (leave empty for all)",
@@ -725,11 +655,11 @@ def display_data_explorer(df: pd.DataFrame) -> None:
                 # Apply SMARTS filter if pattern is provided
                 if smarts_pattern:
                     filtered_df = filter_on_smarts(filtered_df, 'Smiles', smarts_pattern)
-            col_idx += 1
         
         # Time filter if merge_timestamp column exists
         if 'merge_timestamp' in df.columns:
-            with filter_cols[col_idx % 3]:
+            time_cols = st.columns([1])
+            with time_cols[0]:
                 # Convert to datetime for filtering
                 df_time = df.copy()
                 df_time['merge_date'] = pd.to_datetime(df_time['merge_timestamp'])
@@ -753,37 +683,39 @@ def display_data_explorer(df: pd.DataFrame) -> None:
                             (pd.to_datetime(filtered_df['merge_timestamp']).dt.date >= start_date) &
                             (pd.to_datetime(filtered_df['merge_timestamp']).dt.date <= end_date)
                         ]
-            col_idx += 1
         
         # Set filtered dataframe in session state
         st.session_state.filtered_df = filtered_df
     
-    # Show dataframe with sorting enabled
+    # Show data table
     total_rows = len(filtered_df)
     st.markdown(f"**Showing {total_rows} rows**")
     
     # Advanced table options
     table_height = st.slider("Table height", 300, 800, 500, key="table_height")
     
-    st.dataframe(
-        filtered_df,
-        use_container_width=True,
-        height=table_height,
-        column_config={
-            "ID": st.column_config.TextColumn("ID", width="medium"),
-            "Smiles": st.column_config.TextColumn("Smiles", width="large"),
-        }
-    )
-    
-    # Download filtered data
     if not filtered_df.empty:
+        st.dataframe(
+            filtered_df,
+            hide_index=True,
+            use_container_width=True,
+            height=table_height,
+            column_config={
+                "ID": st.column_config.TextColumn("ID", width="medium"),
+                "Smiles": st.column_config.TextColumn("Smiles", width="large"),
+            }
+        )
+        
+        # Download filtered data
         csv = filtered_df.to_csv(index=False)
         st.download_button(
             label="Download Filtered Data as CSV",
             data=csv,
-            file_name=f"filtered_{os.path.basename(st.session_state.selected_file)}",
-            mime="text/csv"
+            file_name=f"filtered_chemical_data_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
         )
+    else:
+        st.info("No data matches the current filters. Try adjusting your filter criteria.")
 
 
 def display_statistical_analysis(df: pd.DataFrame) -> None:
