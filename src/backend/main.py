@@ -59,22 +59,38 @@ if not os.path.exists(REFERENCE_CSV):
 # Load reference columns once at startup
 REFERENCE_COLUMNS = list(pd.read_csv(REFERENCE_CSV, nrows=0).columns)
 
-# Process existing master files at startup to fill missing volumes
+# Add InChI to reference columns if needed but not present
+# It should be positioned right after Smiles column
+if "Smiles" in REFERENCE_COLUMNS and "InChI" not in REFERENCE_COLUMNS:
+    smiles_idx = REFERENCE_COLUMNS.index("Smiles")
+    REFERENCE_COLUMNS.insert(smiles_idx + 1, "InChI")
+    logging.info("Added 'InChI' to reference columns for validation")
+
+# Process existing master files at startup to fill missing volumes and InChI values
 def process_existing_master_files():
-    """Check all existing master CSV files and calculate any missing volume values."""
+    """Check all existing master CSV files and calculate any missing volume values and InChI values."""
     master_files = [f for f in os.listdir(DATA_DIR) if f.startswith("master_") and f.endswith(".csv")]
     
     if not master_files:
-        logging.info("No existing master files found. Nothing to process for volume calculation.")
+        logging.info("No existing master files found. Nothing to process for calculation.")
         return
     
-    total_processed = 0
+    total_processed_volumes = 0
+    total_processed_inchi = 0
     
     for file in master_files:
         file_path = os.path.join(DATA_DIR, file)
         try:
             # Read master file
             df = pd.read_csv(file_path)
+            
+            # Process InChI values
+            if "InChI" not in df.columns and "Smiles" in df.columns:
+                logging.info(f"No InChI column found in {file}. Calculating...")
+                df = add_inchi(df)
+                df.to_csv(file_path, index=False)
+                total_processed_inchi += len(df)
+                logging.info(f"Added InChI values to {len(df)} entries in {file}")
             
             # Check if there are missing volumes
             volume_col = [col for col in df.columns if col.startswith("Volume")]
@@ -96,19 +112,19 @@ def process_existing_master_files():
                 
                 # Count successful calculations
                 successful = missing_count - df_with_volumes[volume_col].isna().sum()
-                total_processed += successful
+                total_processed_volumes += successful
                 
                 logging.info(f"Updated {successful} volume values in {file}")
             else:
                 logging.info(f"No missing volume values in {file}. Skipping.")
                 
         except Exception as e:
-            logging.error(f"Error processing {file} for volume calculation: {str(e)}")
+            logging.error(f"Error processing {file} for calculation: {str(e)}")
     
-    if total_processed > 0:
-        logging.info(f"Startup volume calculation complete. Processed {total_processed} entries across all master files.")
+    if total_processed_volumes > 0 or total_processed_inchi > 0:
+        logging.info(f"Startup calculation complete. Processed {total_processed_volumes} volume values and {total_processed_inchi} InChI values across all master files.")
     else:
-        logging.info("No volume values needed processing.")
+        logging.info("No values needed processing.")
 
 # Run the process at startup
 process_existing_master_files()
@@ -163,6 +179,7 @@ def load_chemical_groups() -> List[str]:
 def validate_csv(df: pd.DataFrame) -> bool:
     """
     Check if DataFrame columns match the reference CSV exactly (names and order).
+    Handles special case for InChI column which may or may not be present in the upload.
     
     Args:
         df: DataFrame to validate
@@ -170,7 +187,19 @@ def validate_csv(df: pd.DataFrame) -> bool:
     Returns:
         bool: True if columns match reference, False otherwise
     """
-    return list(df.columns) == REFERENCE_COLUMNS
+    # Get list of columns from dataframe
+    df_columns = list(df.columns)
+    
+    # Special case: If uploaded CSV doesn't have InChI but reference does, it's okay
+    # We will calculate and add it during processing
+    if "InChI" not in df_columns and "InChI" in REFERENCE_COLUMNS:
+        # Remove InChI from the reference columns for comparison
+        reference_without_inchi = [col for col in REFERENCE_COLUMNS if col != "InChI"]
+        # Return True only if everything else matches
+        return df_columns == reference_without_inchi
+    
+    # Otherwise, require exact match
+    return df_columns == REFERENCE_COLUMNS
 
 
 def validate_ids_and_type(df: pd.DataFrame, group: str) -> None:
@@ -485,6 +514,65 @@ def add_volume(df: pd.DataFrame) -> pd.DataFrame:
     return df_result
 
 
+def add_inchi(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate and add InChI values for all compounds in the dataframe.
+    Uses SMILES from the dataframe to calculate InChI using datamol.
+    
+    Args:
+        df: DataFrame containing a 'Smiles' column
+    
+    Returns:
+        DataFrame: DataFrame with added or updated 'InChI' column
+    """
+    if 'Smiles' not in df.columns:
+        logging.warning("Required column 'Smiles' not found. Cannot calculate InChI.")
+        return df
+    
+    # Create a copy to avoid modifying the original dataframe
+    df_result = df.copy()
+    
+    # Get column index of Smiles
+    smiles_idx = df.columns.get_loc("Smiles")
+    
+    # Convert SMILES to InChI
+    smiles_list = df["Smiles"].tolist()
+    mols_list = [dm.to_mol(smiles) for smiles in smiles_list]
+    inch_list = [dm.to_inchi(mol) for mol in mols_list]
+    
+    # Add or overwrite InChI column right after Smiles column
+    if "InChI" in df.columns:
+        df_result["InChI"] = inch_list
+    else:
+        df_result.insert(smiles_idx + 1, "InChI", inch_list)
+        
+    return df_result
+
+
+def check_duplicate_inchi(df: pd.DataFrame) -> List[Tuple[str, List[str]]]:
+    """
+    Check for duplicate InChI values with different IDs in the dataframe.
+    This indicates that the same chemical compound has been assigned multiple IDs.
+    
+    Args:
+        df: DataFrame containing 'ID' and 'InChI' columns
+        
+    Returns:
+        List[Tuple[str, List[str]]]: List of tuples with (duplicate_inchi, list_of_duplicate_ids)
+    """
+    if 'InChI' not in df.columns or 'ID' not in df.columns:
+        logging.warning("Required columns 'InChI' or 'ID' not found. Cannot check for duplicates.")
+        return []
+    
+    # Group by InChI and get corresponding IDs
+    inchi_groups = df.groupby('InChI')['ID'].apply(list).reset_index()
+    
+    # Filter groups with more than one ID
+    duplicates = inchi_groups[inchi_groups['ID'].apply(len) > 1]
+    
+    return [(row['InChI'], row['ID']) for _, row in duplicates.iterrows()]
+
+
 # API Routes
 @app.get("/chemical_groups", response_model=ChemicalGroupsResponse)
 async def get_chemical_groups() -> Dict[str, List[str]]:
@@ -554,10 +642,59 @@ async def upload_csv(
 
     # 5. Validate IDs and Type for group
     validate_ids_and_type(df, chemical_group)
+    
+    # 5.1 Calculate InChI values for uploaded data
+    df = add_inchi(df)
+    
+    # 5.2 Check for duplicate InChI values within the upload itself
+    upload_duplicates = check_duplicate_inchi(df)
+    if upload_duplicates and not force:
+        duplicate_details = []
+        for inchi, ids in upload_duplicates:
+            duplicate_details.append(f"InChI {inchi[:30]}... has duplicate IDs: {', '.join(ids)}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Duplicate compounds found in upload: {'; '.join(duplicate_details)}"
+        )
 
     # 6. Load master for group
     if os.path.exists(master_csv):
         master_df = pd.read_csv(master_csv)
+        
+        # 6.1 Calculate InChI values for master data if needed
+        if "InChI" not in master_df.columns:
+            master_df = add_inchi(master_df)
+        
+        # 6.2 Check for duplicates between upload and master
+        # Combine dataframes temporarily to check for duplicates
+        combined_df = pd.concat([master_df, df], ignore_index=True)
+        combined_duplicates = check_duplicate_inchi(combined_df)
+        
+        # Filter out duplicates that were already in either master or upload
+        # (those were either previously allowed or just detected in step 5.2)
+        new_duplicates = []
+        master_inchi_to_id = dict(zip(master_df["InChI"], master_df["ID"]))
+        upload_inchi_to_id = dict(zip(df["InChI"], df["ID"]))
+        
+        for inchi, ids in combined_duplicates:
+            # Check if this duplicate involves both master and upload
+            master_ids = [id for id in ids if id in master_df["ID"].values]
+            upload_ids = [id for id in ids if id in df["ID"].values]
+            
+            if master_ids and upload_ids:
+                new_duplicates.append((inchi, master_ids, upload_ids))
+        
+        if new_duplicates and not force:
+            duplicate_details = []
+            for inchi, master_ids, upload_ids in new_duplicates:
+                duplicate_details.append(
+                    f"InChI {inchi[:30]}... in upload IDs {', '.join(upload_ids)} "
+                    f"matches existing IDs {', '.join(master_ids)}"
+                )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cross-file duplicate compounds found: {'; '.join(duplicate_details)}"
+            )
     else:
         master_df = pd.DataFrame(columns=REFERENCE_COLUMNS)
 
