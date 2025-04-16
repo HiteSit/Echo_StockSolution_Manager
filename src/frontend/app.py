@@ -17,6 +17,9 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 
 import requests
 import streamlit as st
+# Import RDKit and datamol for SMARTS filtering
+from rdkit import Chem
+import datamol as dm
 
 # Import authentication module
 from auth import check_authentication
@@ -709,29 +712,19 @@ def display_data_explorer(df: pd.DataFrame) -> None:
                         ]
             col_idx += 1
         
-        # Add SMILES pattern filter if Smiles column exists
+        # Replace SMILES pattern filter with SMARTS pattern filter if Smiles column exists
         if 'Smiles' in df.columns:
             with filter_cols[col_idx % 3]:
-                # Create dropdown for common chemical patterns
-                smiles_patterns = {
-                    "All": None,
-                    "Contains Nitrogen (N)": "N",
-                    "Contains Oxygen (O)": "O",
-                    "Contains Fluorine (F)": "F",
-                    "Contains Chlorine (Cl)": "Cl",
-                    "Contains Bromine (Br)": "Br",
-                    "Contains Aromatic Ring": "c1" # Simple check for aromatic carbon
-                }
-                
-                selected_pattern = st.selectbox(
-                    "SMILES Pattern",
-                    options=list(smiles_patterns.keys()),
-                    key="smiles_pattern"
+                # Create text input for SMARTS pattern
+                smarts_pattern = st.text_input(
+                    "SMARTS Pattern (leave empty for all)",
+                    key="smarts_pattern",
+                    help="Enter a valid SMARTS pattern to filter molecules"
                 )
                 
-                if selected_pattern != "All" and smiles_patterns[selected_pattern]:
-                    pattern = smiles_patterns[selected_pattern]
-                    filtered_df = filtered_df[filtered_df['Smiles'].str.contains(pattern, na=False)]
+                # Apply SMARTS filter if pattern is provided
+                if smarts_pattern:
+                    filtered_df = filter_on_smarts(filtered_df, 'Smiles', smarts_pattern)
             col_idx += 1
         
         # Time filter if merge_timestamp column exists
@@ -1006,6 +999,44 @@ def display_timeline_analysis(df: pd.DataFrame) -> None:
             ]
         
         st.dataframe(latest_entries[df.columns], use_container_width=True)
+
+
+def filter_on_smarts(df: pd.DataFrame, smiles_col: str, smarts_str: str) -> pd.DataFrame:
+    """Filter molecules based on SMARTS pattern.
+    
+    Args:
+        df: DataFrame containing molecule data
+        smiles_col: Name of column containing SMILES strings
+        smarts_str: SMARTS pattern as string
+    
+    Returns:
+        DataFrame with only rows matching the SMARTS pattern
+    """
+    try:
+        # Convert SMARTS string to molecule object
+        smarts = dm.from_smarts(smarts_str)
+        
+        # Find matching indices
+        filtered_ndx = []
+        for ndx, row in df.iterrows():
+            smiles = row[smiles_col]
+            
+            # Convert SMILES to molecule
+            mol = dm.to_mol(smiles)
+            
+            # Skip if conversion failed
+            if mol is None:
+                continue
+                
+            # Check for substructure match
+            if mol.HasSubstructMatch(smarts):
+                filtered_ndx.append(ndx)
+                
+        # Return filtered dataframe
+        return df.iloc[filtered_ndx]
+    except Exception:
+        # Return empty dataframe if something went wrong
+        return df.iloc[[]]
 
 
 if __name__ == "__main__":
