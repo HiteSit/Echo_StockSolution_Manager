@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 BACKEND_HOST = os.environ.get("BACKEND_HOST", "localhost")
 BACKEND_PORT = os.environ.get("BACKEND_PORT", "8000")
 BACKEND = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
-APP_TITLE = "Chemical Groups Data Manager"
+APP_TITLE = "Domling Lab Echo Data Manager"
 APP_DESCRIPTION = "Upload and manage chemical group data through CSV files"
 
 # Set page configuration

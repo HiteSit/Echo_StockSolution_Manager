@@ -7,14 +7,20 @@ It handles CSV uploads, validation, and merging into a master database.
 import json
 import os
 import re
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import pandas as pd
+import numpy as np
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+# Import RDKit and related modules for volume calculation
+from rdkit import Chem
+from rdkit.Chem import Descriptors
+import datamol as dm
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -53,6 +59,59 @@ if not os.path.exists(REFERENCE_CSV):
 # Load reference columns once at startup
 REFERENCE_COLUMNS = list(pd.read_csv(REFERENCE_CSV, nrows=0).columns)
 
+# Process existing master files at startup to fill missing volumes
+def process_existing_master_files():
+    """Check all existing master CSV files and calculate any missing volume values."""
+    master_files = [f for f in os.listdir(DATA_DIR) if f.startswith("master_") and f.endswith(".csv")]
+    
+    if not master_files:
+        logging.info("No existing master files found. Nothing to process for volume calculation.")
+        return
+    
+    total_processed = 0
+    
+    for file in master_files:
+        file_path = os.path.join(DATA_DIR, file)
+        try:
+            # Read master file
+            df = pd.read_csv(file_path)
+            
+            # Check if there are missing volumes
+            volume_col = [col for col in df.columns if col.startswith("Volume")]
+            if not volume_col:
+                logging.warning(f"No Volume column found in {file}. Skipping volume calculation.")
+                continue
+                
+            volume_col = volume_col[0]
+            missing_count = df[volume_col].isna().sum()
+            
+            if missing_count > 0:
+                logging.info(f"Found {missing_count} missing volume values in {file}. Calculating...")
+                
+                # Calculate volumes for missing entries
+                df_with_volumes = add_volume(df)
+                
+                # Save updated file
+                df_with_volumes.to_csv(file_path, index=False)
+                
+                # Count successful calculations
+                successful = missing_count - df_with_volumes[volume_col].isna().sum()
+                total_processed += successful
+                
+                logging.info(f"Updated {successful} volume values in {file}")
+            else:
+                logging.info(f"No missing volume values in {file}. Skipping.")
+                
+        except Exception as e:
+            logging.error(f"Error processing {file} for volume calculation: {str(e)}")
+    
+    if total_processed > 0:
+        logging.info(f"Startup volume calculation complete. Processed {total_processed} entries across all master files.")
+    else:
+        logging.info("No volume values needed processing.")
+
+# Run the process at startup
+process_existing_master_files()
 
 # Pydantic models for API responses
 class ChemicalGroupsResponse(BaseModel):
@@ -171,7 +230,7 @@ def check_for_missing_ids(master_df: pd.DataFrame, upload_df: pd.DataFrame) -> S
 
 def find_conflicts(master_df: pd.DataFrame, upload_df: pd.DataFrame) -> List[str]:
     """
-    Find IDs where row data (excluding ID) differs between master and upload.
+    Find IDs where row data (excluding ID, merge_timestamp and Volume) differs between master and upload.
     
     Args:
         master_df: DataFrame containing existing master data
@@ -183,26 +242,39 @@ def find_conflicts(master_df: pd.DataFrame, upload_df: pd.DataFrame) -> List[str
     conflicts = []
     common_ids = set(master_df["ID"]).intersection(set(upload_df["ID"]))
     
+    # Columns to ignore in conflict check
+    ignore_columns = ["ID", "merge_timestamp"]
+    # Find Volume column (if exists)
+    volume_columns = [col for col in master_df.columns if col.startswith("Volume")]
+    if volume_columns:
+        ignore_columns.extend(volume_columns)
+    
     for id_val in common_ids:
         master_row = master_df.loc[master_df["ID"] == id_val].iloc[0]
         upload_row = upload_df.loc[upload_df["ID"] == id_val].iloc[0]
         
+        has_conflict = False
         for col in upload_df.columns:
-            if col == "ID":
+            # Skip ignored columns
+            if col in ignore_columns:
                 continue
                 
-            # Handle null values
+            # Handle null values - both null is considered equal
             if pd.isnull(master_row[col]) and pd.isnull(upload_row[col]):
                 continue
                 
-            # Check for value equality
+            # Both values match
             if (not pd.isnull(master_row[col]) and 
                 not pd.isnull(upload_row[col]) and 
                 master_row[col] == upload_row[col]):
                 continue
                 
-            conflicts.append(id_val)
+            # We found a real conflict
+            has_conflict = True
             break
+        
+        if has_conflict:
+            conflicts.append(id_val)
             
     return conflicts
 
@@ -278,31 +350,137 @@ def check_sequential_ids(master_df: pd.DataFrame, new_rows: pd.DataFrame, group:
 
 def append_merge_history(new_rows: pd.DataFrame, timestamp: str, chemical_group: str) -> None:
     """
-    Append a summary row to merge_history.csv with details about the merge operation.
+    Append merge history to a log file for tracking.
     
     Args:
-        new_rows: DataFrame containing newly added rows
-        timestamp: ISO-formatted timestamp for the merge operation
-        chemical_group: Name of the chemical group being merged
+        new_rows: DataFrame containing new rows that were merged
+        timestamp: ISO format timestamp of the merge
+        chemical_group: Name of the chemical group
     """
-    history_path = os.path.join(DATA_DIR, "merge_history.csv")
-    num_rows = len(new_rows)
-    ids_added = ",".join(str(i) for i in new_rows["ID"].tolist())
+    history_file = os.path.join(DATA_DIR, "merge_history.csv")
     
-    summary_row = {
+    # Create data for history
+    history_data = {
+        "timestamp": timestamp,
         "chemical_group": chemical_group,
-        "merge_timestamp": timestamp,
-        "num_rows_added": num_rows,
-        "ids_added": ids_added
+        "num_rows": len(new_rows),
+        "ids": ";".join(new_rows["ID"].astype(str).tolist())
     }
     
-    if os.path.exists(history_path):
-        history_df = pd.read_csv(history_path)
-        history_df = pd.concat([history_df, pd.DataFrame([summary_row])], ignore_index=True)
+    # Create or append to history file
+    history_df = pd.DataFrame([history_data])
+    
+    if os.path.exists(history_file):
+        history_df.to_csv(history_file, mode='a', header=False, index=False)
     else:
-        history_df = pd.DataFrame([summary_row])
+        history_df.to_csv(history_file, index=False)
+
+
+def add_volume(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate and add missing volume values using mass and concentration data.
+    Uses SMILES from the dataframe to calculate molar mass using RDKit.
+    Only calculates volumes for rows where Volume is NaN.
+    
+    Args:
+        df: DataFrame containing Mass, Concentration, and SMILES columns
+    
+    Returns:
+        DataFrame: DataFrame with calculated volumes
+    """
+    # Create a copy to avoid modifying the original dataframe
+    df_result = df.copy()
+    
+    # Check if the required columns exist
+    required_cols = ["Smiles", "Mass", "Conc", "Volume"]
+    for col_prefix in required_cols:
+        matching_cols = [col for col in df.columns if col.startswith(col_prefix)]
+        if not matching_cols:
+            logging.warning(f"Required column with prefix '{col_prefix}' not found. Cannot calculate volume.")
+            return df_result
+    
+    # Extract column names and units using regex
+    regex_pattern = r'\(([^)]+)\)'
+    regex = re.compile(regex_pattern)
+    
+    # Get the actual column names
+    mass_column = [col for col in df.columns if col.startswith("Mass")][0]
+    concentration_column = [col for col in df.columns if col.startswith("Conc")][0]
+    volume_column = [col for col in df.columns if col.startswith("Volume")][0]
+    
+    # Extract units from column names
+    try:
+        mass_unit = regex.search(mass_column).group(1)
+        concentration_unit = regex.search(concentration_column).group(1)
+        volume_unit = regex.search(volume_column).group(1)
         
-    history_df.to_csv(history_path, index=False)
+        logging.info(f"Units detected: Mass: {mass_unit}, Concentration: {concentration_unit}, Volume: {volume_unit}")
+    except (AttributeError, IndexError):
+        logging.error("Failed to extract units from column names. Check column format (e.g., 'Mass (mg)').")
+        return df_result
+    
+    # Unit conversion factors
+    mass_to_g = 0.001 if mass_unit == 'mg' else 1  # Convert mg to g
+    conc_to_mol_L = 1 if concentration_unit == 'M' else 1  # M is already mol/L
+    L_to_target_vol = 1000000 if volume_unit == 'uL' else 1000 if volume_unit == 'mL' else 1  # Convert L to target volume unit
+    
+    # Calculate volume for rows with NaN in volume column
+    volume_mask = df_result[volume_column].isna()
+    
+    if volume_mask.any():
+        # Get rows with missing volume
+        rows_to_calculate = df_result.loc[volume_mask]
+        
+        # Calculate molar mass for each compound using SMILES
+        molar_masses = []
+        for smiles in rows_to_calculate['Smiles']:
+            try:
+                # Convert SMILES to RDKit molecule
+                mol = Chem.MolFromSmiles(smiles)
+                if mol is not None:
+                    # Calculate exact molecular weight in g/mol
+                    molar_mass = Descriptors.ExactMolWt(mol)
+                    molar_masses.append(molar_mass)
+                else:
+                    # If SMILES parsing fails, append NaN
+                    molar_masses.append(np.nan)
+                    logging.warning(f"Failed to parse SMILES: {smiles}")
+            except Exception as e:
+                molar_masses.append(np.nan)
+                logging.error(f"Error calculating molar mass for {smiles}: {str(e)}")
+        
+        # Get mass and concentration values for rows with missing volume
+        masses = rows_to_calculate[mass_column].values
+        concentrations = rows_to_calculate[concentration_column].values
+        
+        # Calculate volume in liters: Mass (g) / (Concentration (mol/L) * Molar Mass (g/mol))
+        volumes_L = []
+        for mass, conc, mol_mass in zip(masses, concentrations, molar_masses):
+            if np.isnan(mol_mass):
+                volumes_L.append(np.nan)
+            else:
+                # Convert mass to grams
+                mass_g = mass * mass_to_g
+                # Calculate volume in liters
+                volume_L = mass_g / (conc * mol_mass)
+                volumes_L.append(volume_L)
+        
+        # Convert to target volume unit
+        volumes_target_unit = [vol * L_to_target_vol if not np.isnan(vol) else np.nan for vol in volumes_L]
+        
+        # Round values to three decimal places
+        volumes_target_unit = [round(vol, 3) if not np.isnan(vol) else np.nan for vol in volumes_target_unit]
+        
+        # Add calculated volumes to dataframe
+        df_result.loc[volume_mask, volume_column] = volumes_target_unit
+        
+        # Count successful calculations
+        successful_calcs = sum(~np.isnan(volumes_target_unit))
+        logging.info(f"Calculated {successful_calcs} out of {volume_mask.sum()} missing volume values")
+    else:
+        logging.info("No missing volume values found")
+    
+    return df_result
 
 
 # API Routes
@@ -430,24 +608,27 @@ async def upload_csv(
     
     # If force=True, we proceed with the merge even if IDs are not sequential or conflicting
 
+    # 10.3 Calculate volumes for new rows with missing values
+    new_rows_with_volumes = add_volume(new_rows)
+    
     # 11. Add merge_timestamp and append to master
     timestamp = datetime.now().isoformat()
-    new_rows["merge_timestamp"] = timestamp
+    new_rows_with_volumes["merge_timestamp"] = timestamp
     
     if "merge_timestamp" not in master_df.columns:
         master_df["merge_timestamp"] = None
         
-    merged_df = pd.concat([master_df, new_rows], ignore_index=True)
+    merged_df = pd.concat([master_df, new_rows_with_volumes], ignore_index=True)
     merged_df.to_csv(master_csv, index=False)
 
     # 12. Log merge history
-    append_merge_history(new_rows, timestamp, chemical_group)
+    append_merge_history(new_rows_with_volumes, timestamp, chemical_group)
 
     return {
         "status": "ok",
-        "message": f"Merged {len(new_rows)} new rows.",
+        "message": f"Merged {len(new_rows_with_volumes)} new rows.",
         "diff": {
-            "new": new_rows["ID"].tolist(),
+            "new": new_rows_with_volumes["ID"].tolist(),
             "conflicts": conflicts if conflicts else [],
             "deletions": list(missing_ids)
         }
