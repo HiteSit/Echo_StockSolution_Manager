@@ -575,36 +575,168 @@ def display_data_explorer(df: pd.DataFrame) -> None:
     
     # Search & filter section
     with st.expander("Search & Filter", expanded=True):
-        col1, col2 = st.columns(2)
+        # Text search
+        search_term = st.text_input("Search in all columns", key="search_input")
         
-        with col1:
-            # Text search
-            search_term = st.text_input("Search in all columns", key="search_input")
-        
-        with col2:
-            # Column filter
-            if 'Type' in df.columns:
-                unique_types = df['Type'].unique().tolist()
-                selected_types = st.multiselect(
-                    "Filter by Type",
-                    options=unique_types,
-                    default=unique_types,
-                    key="type_filter"
-                )
-        
-        # Apply filters
+        # Apply initial text search filter
         filtered_df = df.copy()
-        
-        # Apply text search if entered
         if search_term:
             mask = pd.Series(False, index=df.index)
             for col in df.columns:
                 mask |= df[col].astype(str).str.contains(search_term, case=False, na=False)
             filtered_df = filtered_df[mask]
         
-        # Apply type filter if selected
-        if 'Type' in df.columns and selected_types and len(selected_types) < len(unique_types):
-            filtered_df = filtered_df[filtered_df['Type'].isin(selected_types)]
+        # Dynamic filtering based on column types
+        st.markdown("#### Advanced Filters")
+        
+        # Create filter columns - adjust based on number of filters
+        filter_cols = st.columns(3)
+        col_idx = 0
+        
+        # Type filter (categorical)
+        if 'Type' in df.columns:
+            with filter_cols[col_idx % 3]:
+                unique_types = sorted(df['Type'].unique().tolist())
+                selected_types = st.multiselect(
+                    "Filter by Type",
+                    options=unique_types,
+                    default=unique_types,
+                    key="type_filter"
+                )
+                if selected_types and len(selected_types) < len(unique_types):
+                    filtered_df = filtered_df[filtered_df['Type'].isin(selected_types)]
+            col_idx += 1
+        
+        # Box filter (categorical if present)
+        if 'Box' in df.columns:
+            with filter_cols[col_idx % 3]:
+                unique_boxes = sorted(df['Box'].dropna().unique().tolist())
+                if len(unique_boxes) > 0 and len(unique_boxes) <= 20:  # Only show if reasonable number of values
+                    selected_boxes = st.multiselect(
+                        "Filter by Box",
+                        options=unique_boxes,
+                        default=unique_boxes,
+                        key="box_filter"
+                    )
+                    if selected_boxes and len(selected_boxes) < len(unique_boxes):
+                        filtered_df = filtered_df[filtered_df['Box'].isin(selected_boxes)]
+            col_idx += 1
+        
+        # Numerical range filters (for numeric columns)
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+        
+        # Mass filter
+        if 'Mass (mg)' in numeric_cols:
+            with filter_cols[col_idx % 3]:
+                min_val = float(df['Mass (mg)'].min())
+                max_val = float(df['Mass (mg)'].max())
+                if min_val < max_val:
+                    mass_range = st.slider(
+                        "Mass Range (mg)",
+                        min_value=min_val,
+                        max_value=max_val,
+                        value=(min_val, max_val),
+                        key="mass_filter"
+                    )
+                    filtered_df = filtered_df[
+                        (filtered_df['Mass (mg)'] >= mass_range[0]) & 
+                        (filtered_df['Mass (mg)'] <= mass_range[1])
+                    ]
+            col_idx += 1
+        
+        # Concentration filter
+        if 'Conc (M)' in numeric_cols:
+            with filter_cols[col_idx % 3]:
+                min_val = float(df['Conc (M)'].min())
+                max_val = float(df['Conc (M)'].max())
+                if min_val < max_val:
+                    conc_range = st.slider(
+                        "Concentration Range (M)",
+                        min_value=min_val,
+                        max_value=max_val,
+                        value=(min_val, max_val),
+                        key="conc_filter"
+                    )
+                    filtered_df = filtered_df[
+                        (filtered_df['Conc (M)'] >= conc_range[0]) & 
+                        (filtered_df['Conc (M)'] <= conc_range[1])
+                    ]
+            col_idx += 1
+        
+        # Volume filter
+        if 'Volume (uL)' in numeric_cols:
+            with filter_cols[col_idx % 3]:
+                # Handle NaN values properly
+                vol_data = df['Volume (uL)'].dropna()
+                if not vol_data.empty:
+                    min_val = float(vol_data.min())
+                    max_val = float(vol_data.max())
+                    if min_val < max_val:
+                        vol_range = st.slider(
+                            "Volume Range (uL)",
+                            min_value=min_val,
+                            max_value=max_val,
+                            value=(min_val, max_val),
+                            key="vol_filter"
+                        )
+                        filtered_df = filtered_df[
+                            (filtered_df['Volume (uL)'].fillna(-1) >= vol_range[0]) & 
+                            (filtered_df['Volume (uL)'].fillna(float('inf')) <= vol_range[1])
+                        ]
+            col_idx += 1
+        
+        # Add SMILES pattern filter if Smiles column exists
+        if 'Smiles' in df.columns:
+            with filter_cols[col_idx % 3]:
+                # Create dropdown for common chemical patterns
+                smiles_patterns = {
+                    "All": None,
+                    "Contains Nitrogen (N)": "N",
+                    "Contains Oxygen (O)": "O",
+                    "Contains Fluorine (F)": "F",
+                    "Contains Chlorine (Cl)": "Cl",
+                    "Contains Bromine (Br)": "Br",
+                    "Contains Aromatic Ring": "c1" # Simple check for aromatic carbon
+                }
+                
+                selected_pattern = st.selectbox(
+                    "SMILES Pattern",
+                    options=list(smiles_patterns.keys()),
+                    key="smiles_pattern"
+                )
+                
+                if selected_pattern != "All" and smiles_patterns[selected_pattern]:
+                    pattern = smiles_patterns[selected_pattern]
+                    filtered_df = filtered_df[filtered_df['Smiles'].str.contains(pattern, na=False)]
+            col_idx += 1
+        
+        # Time filter if merge_timestamp column exists
+        if 'merge_timestamp' in df.columns:
+            with filter_cols[col_idx % 3]:
+                # Convert to datetime for filtering
+                df_time = df.copy()
+                df_time['merge_date'] = pd.to_datetime(df_time['merge_timestamp'])
+                
+                min_date = df_time['merge_date'].min().date()
+                max_date = df_time['merge_date'].max().date()
+                
+                if min_date != max_date:
+                    date_range = st.date_input(
+                        "Date Range",
+                        value=(min_date, max_date),
+                        min_value=min_date,
+                        max_value=max_date,
+                        key="date_filter"
+                    )
+                    
+                    # Apply date filter if a range is selected
+                    if isinstance(date_range, tuple) and len(date_range) == 2:
+                        start_date, end_date = date_range
+                        filtered_df = filtered_df[
+                            (pd.to_datetime(filtered_df['merge_timestamp']).dt.date >= start_date) &
+                            (pd.to_datetime(filtered_df['merge_timestamp']).dt.date <= end_date)
+                        ]
+            col_idx += 1
         
         # Set filtered dataframe in session state
         st.session_state.filtered_df = filtered_df
