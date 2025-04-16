@@ -25,6 +25,9 @@ A modern, robust platform for uploading, validating, and merging chemical group 
 - Upload and validate CSV files for specific chemical groups
 - Strict schema and data validation against a reference
 - Conflict detection, merge history logging, and prevention of accidental deletions
+- Advanced data visualization dashboard for exploring chemical data
+- Interactive filtering, sorting, and statistical analysis tools
+- Chemical property visualizations and timeline analytics
 - Intuitive Streamlit web interface
 - REST API (FastAPI) for programmatic access
 - Automated one-command launch with advanced error handling
@@ -158,6 +161,12 @@ To expose the app publicly:
 - **Features:**
   - File upload and group selection UI
   - Displays upload results, conflicts, troubleshooting
+  - Data visualization dashboard with multiple analysis tools:
+    - Data explorer with advanced filtering and search capabilities
+    - Statistical analysis of numerical properties
+    - Chemical property visualizations (SMILES complexity, type distribution)
+    - Timeline analysis of data entries over time
+  - Export functionality for filtered datasets
 - **Backend URL:** Set in `app.py` (`BACKEND = ...`)
 - **Logs:** `frontend.log`
 

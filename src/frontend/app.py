@@ -6,6 +6,13 @@ with validation and integration with the backend API.
 
 import logging
 import os
+import glob
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.express as px
+import plotly.graph_objects as go
 from typing import Dict, List, Optional, Tuple, Union, Any
 
 import requests
@@ -98,7 +105,22 @@ def main() -> None:
         display_confirmation_dialog(st.session_state.upload_data)
         return
     
-    # Main workflow area
+    # Create tabs for different functions
+    upload_tab, visualize_tab = st.tabs(["Upload CSV", "Data Visualization Dashboard"])
+    
+    with upload_tab:
+        display_upload_interface(groups)
+    
+    with visualize_tab:
+        display_data_visualization_dashboard()
+
+
+def display_upload_interface(groups: List[str]) -> None:
+    """Display the CSV upload interface.
+    
+    Args:
+        groups: List of available chemical groups
+    """
     st.markdown("<h2 class='subheader'>Upload CSV Data</h2>", unsafe_allow_html=True)
     
     # Create columns for better layout
@@ -472,6 +494,362 @@ def display_troubleshooting_info() -> None:
            - Stop both frontend and backend
            - Run the RUN.sh script again
         """)
+
+
+def display_data_visualization_dashboard() -> None:
+    """Display the data visualization dashboard for exploring master CSV files."""
+    st.markdown("<h2 class='subheader'>Data Visualization Dashboard</h2>", unsafe_allow_html=True)
+    
+    # Initialize session state for visualizer if needed
+    if "selected_file" not in st.session_state:
+        st.session_state.selected_file = None
+    if "current_df" not in st.session_state:
+        st.session_state.current_df = None
+    if "filtered_df" not in st.session_state:
+        st.session_state.filtered_df = None
+    
+    # Get list of master CSV files
+    master_csv_files = glob.glob(os.path.join("data", "master_*.csv"))
+    if not master_csv_files:
+        st.warning("No master CSV files found in the data directory.")
+        return
+    
+    # Format file names for display (remove path and extension)
+    file_display_names = [os.path.basename(f).replace("master_", "").replace(".csv", "") for f in master_csv_files]
+    file_mapping = dict(zip(file_display_names, master_csv_files))
+    
+    # File selection
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        selected_file_name = st.selectbox(
+            "Select Chemical Group Data",
+            options=file_display_names,
+            key="viz_file_select"
+        )
+        
+        if selected_file_name:
+            file_path = file_mapping[selected_file_name]
+            
+            # Load the file if it's different from the currently loaded one
+            if st.session_state.selected_file != file_path:
+                try:
+                    df = pd.read_csv(file_path)
+                    st.session_state.current_df = df
+                    st.session_state.filtered_df = df
+                    st.session_state.selected_file = file_path
+                except Exception as e:
+                    st.error(f"Error loading file: {str(e)}")
+                    return
+    
+    # If no dataframe is loaded, return
+    if st.session_state.current_df is None:
+        return
+    
+    # Get current dataframe
+    df = st.session_state.current_df
+    
+    # Dashboard sections using tabs
+    viz_tabs = st.tabs(["Data Explorer", "Statistical Analysis", "Chemical Properties", "Timeline Analysis"])
+    
+    with viz_tabs[0]:  # Data Explorer
+        display_data_explorer(df)
+    
+    with viz_tabs[1]:  # Statistical Analysis
+        display_statistical_analysis(df)
+    
+    with viz_tabs[2]:  # Chemical Properties
+        display_chemical_properties(df)
+    
+    with viz_tabs[3]:  # Timeline Analysis
+        display_timeline_analysis(df)
+
+
+def display_data_explorer(df: pd.DataFrame) -> None:
+    """Display data explorer interface with filtering and searching capabilities.
+    
+    Args:
+        df: DataFrame containing the master data
+    """
+    st.markdown("### Data Explorer")
+    
+    # Search & filter section
+    with st.expander("Search & Filter", expanded=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Text search
+            search_term = st.text_input("Search in all columns", key="search_input")
+        
+        with col2:
+            # Column filter
+            if 'Type' in df.columns:
+                unique_types = df['Type'].unique().tolist()
+                selected_types = st.multiselect(
+                    "Filter by Type",
+                    options=unique_types,
+                    default=unique_types,
+                    key="type_filter"
+                )
+        
+        # Apply filters
+        filtered_df = df.copy()
+        
+        # Apply text search if entered
+        if search_term:
+            mask = pd.Series(False, index=df.index)
+            for col in df.columns:
+                mask |= df[col].astype(str).str.contains(search_term, case=False, na=False)
+            filtered_df = filtered_df[mask]
+        
+        # Apply type filter if selected
+        if 'Type' in df.columns and selected_types and len(selected_types) < len(unique_types):
+            filtered_df = filtered_df[filtered_df['Type'].isin(selected_types)]
+        
+        # Set filtered dataframe in session state
+        st.session_state.filtered_df = filtered_df
+    
+    # Show dataframe with sorting enabled
+    total_rows = len(filtered_df)
+    st.markdown(f"**Showing {total_rows} rows**")
+    
+    # Advanced table options
+    table_height = st.slider("Table height", 300, 800, 500, key="table_height")
+    
+    st.dataframe(
+        filtered_df,
+        use_container_width=True,
+        height=table_height,
+        column_config={
+            "ID": st.column_config.TextColumn("ID", width="medium"),
+            "Smiles": st.column_config.TextColumn("Smiles", width="large"),
+        }
+    )
+    
+    # Download filtered data
+    if not filtered_df.empty:
+        csv = filtered_df.to_csv(index=False)
+        st.download_button(
+            label="Download Filtered Data as CSV",
+            data=csv,
+            file_name=f"filtered_{os.path.basename(st.session_state.selected_file)}",
+            mime="text/csv"
+        )
+
+
+def display_statistical_analysis(df: pd.DataFrame) -> None:
+    """Display statistical analysis of numerical columns.
+    
+    Args:
+        df: DataFrame containing the master data
+    """
+    st.markdown("### Statistical Analysis")
+    
+    # Get numerical columns
+    numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
+    
+    if not numeric_cols:
+        st.info("No numerical columns found for statistical analysis.")
+        return
+    
+    # Basic statistics
+    st.subheader("Descriptive Statistics")
+    st.dataframe(df[numeric_cols].describe(), use_container_width=True)
+    
+    # Histogram plots for selected columns
+    st.subheader("Distribution Analysis")
+    
+    selected_col = st.selectbox(
+        "Select column for distribution analysis",
+        options=numeric_cols,
+        key="stat_column_select"
+    )
+    
+    if selected_col:
+        # Check if there are valid values
+        valid_data = df[selected_col].dropna()
+        
+        if len(valid_data) > 0:
+            # Distribution plot
+            fig = px.histogram(
+                df, 
+                x=selected_col,
+                title=f"Distribution of {selected_col}",
+                nbins=20,
+                opacity=0.7
+            )
+            fig.update_layout(
+                xaxis_title=selected_col,
+                yaxis_title="Count",
+                bargap=0.05,
+                template="plotly_white"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Show additional statistics
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Mean", f"{valid_data.mean():.2f}")
+            col2.metric("Median", f"{valid_data.median():.2f}")
+            col3.metric("Std Dev", f"{valid_data.std():.2f}")
+        else:
+            st.warning(f"No valid numerical data in column '{selected_col}'.")
+
+
+def display_chemical_properties(df: pd.DataFrame) -> None:
+    """Display analysis of chemical-specific properties.
+    
+    Args:
+        df: DataFrame containing the master data
+    """
+    st.markdown("### Chemical Properties Visualization")
+    
+    # Check if we have Smiles column
+    has_smiles = 'Smiles' in df.columns
+    has_type = 'Type' in df.columns
+    
+    if not (has_smiles or has_type):
+        st.info("No chemical-specific columns (Smiles, Type) found for analysis.")
+        return
+    
+    # Type distribution if available
+    if has_type:
+        st.subheader("Chemical Type Distribution")
+        
+        type_counts = df['Type'].value_counts().reset_index()
+        type_counts.columns = ['Type', 'Count']
+        
+        fig = px.pie(
+            type_counts, 
+            values='Count', 
+            names='Type',
+            title="Distribution of Chemical Types",
+            hole=0.4
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Smiles visualization if available
+    if has_smiles:
+        st.subheader("SMILES Analysis")
+        
+        # Calculate SMILES complexity (using length as a simple proxy)
+        df_with_complexity = df.copy()
+        df_with_complexity['SMILES_length'] = df['Smiles'].str.len()
+        
+        # Plot SMILES complexity
+        fig = px.box(
+            df_with_complexity,
+            y='SMILES_length',
+            points="all",
+            title="SMILES Complexity Distribution (String Length)"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Show most complex molecules
+        st.subheader("Top 5 Most Complex Molecules (by SMILES length)")
+        complex_df = df_with_complexity.sort_values('SMILES_length', ascending=False).head(5)
+        st.dataframe(
+            complex_df[['ID', 'Type', 'Smiles', 'SMILES_length']],
+            use_container_width=True
+        )
+
+
+def display_timeline_analysis(df: pd.DataFrame) -> None:
+    """Display timeline analysis based on merge timestamps.
+    
+    Args:
+        df: DataFrame containing the master data
+    """
+    st.markdown("### Timeline Analysis")
+    
+    # Check if we have merge_timestamp column
+    if 'merge_timestamp' not in df.columns:
+        st.info("No merge timestamp information available for timeline analysis.")
+        return
+    
+    # Convert to datetime
+    df_time = df.copy()
+    df_time['merge_date'] = pd.to_datetime(df_time['merge_timestamp'])
+    
+    # Extract date components
+    df_time['merge_year'] = df_time['merge_date'].dt.year
+    df_time['merge_month'] = df_time['merge_date'].dt.month
+    df_time['merge_day'] = df_time['merge_date'].dt.day
+    df_time['merge_hour'] = df_time['merge_date'].dt.hour
+    
+    # Group by date
+    st.subheader("Entries Added Over Time")
+    
+    # Select grouping level
+    group_by = st.selectbox(
+        "Group by",
+        options=["Day", "Month", "Year"],
+        index=0,
+        key="timeline_group"
+    )
+    
+    if group_by == "Day":
+        group_col = ['merge_year', 'merge_month', 'merge_day']
+        date_format = '%Y-%m-%d'
+    elif group_by == "Month":
+        group_col = ['merge_year', 'merge_month']
+        date_format = '%Y-%m'
+    else:  # Year
+        group_col = ['merge_year']
+        date_format = '%Y'
+    
+    # Count entries by date
+    timeline_data = df_time.groupby(group_col).size().reset_index(name='count')
+    
+    # Create date string for display
+    if group_by == "Day":
+        timeline_data['date_str'] = timeline_data.apply(
+            lambda x: f"{int(x['merge_year'])}-{int(x['merge_month']):02d}-{int(x['merge_day']):02d}", 
+            axis=1
+        )
+    elif group_by == "Month":
+        timeline_data['date_str'] = timeline_data.apply(
+            lambda x: f"{int(x['merge_year'])}-{int(x['merge_month']):02d}", 
+            axis=1
+        )
+    else:  # Year
+        timeline_data['date_str'] = timeline_data['merge_year'].astype(str)
+    
+    # Sort by date
+    timeline_data = timeline_data.sort_values('date_str')
+    
+    # Create timeline chart
+    fig = px.bar(
+        timeline_data,
+        x='date_str',
+        y='count',
+        title=f"Number of Entries Added by {group_by}",
+        labels={'date_str': 'Date', 'count': 'Number of Entries'}
+    )
+    fig.update_layout(xaxis_tickangle=-45)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Show entries from most recent date
+    if not timeline_data.empty:
+        latest_date = timeline_data['date_str'].iloc[-1]
+        st.subheader(f"Most Recent Additions ({latest_date})")
+        
+        if group_by == "Day":
+            latest_entries = df_time[
+                (df_time['merge_year'] == timeline_data['merge_year'].iloc[-1]) &
+                (df_time['merge_month'] == timeline_data['merge_month'].iloc[-1]) &
+                (df_time['merge_day'] == timeline_data['merge_day'].iloc[-1])
+            ]
+        elif group_by == "Month":
+            latest_entries = df_time[
+                (df_time['merge_year'] == timeline_data['merge_year'].iloc[-1]) &
+                (df_time['merge_month'] == timeline_data['merge_month'].iloc[-1])
+            ]
+        else:  # Year
+            latest_entries = df_time[
+                df_time['merge_year'] == timeline_data['merge_year'].iloc[-1]
+            ]
+        
+        st.dataframe(latest_entries[df.columns], use_container_width=True)
 
 
 if __name__ == "__main__":
