@@ -1,0 +1,12 @@
+{
+    "credentials": {
+        "usernames": {
+            "hitesit": {
+                "name": "Riccardo Fusco",
+                "email": "riccardo.fusco@upol.cz",
+                "role": "admin",
+                "password": "$2b$12$MJWjCBTJVpwlWu5iJlyh3uAN9oKZg9TOQ7MVvIUtQ/3X6xbwhtxIG"
+            }
+        }
+    }
+}
