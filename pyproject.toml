@@ -17,4 +17,5 @@ dependencies = [
     "seaborn>=0.13.0",
     "plotly>=5.20.0",
     "notebook>=7.4.0",
+    "streamlit-authenticator==0.2.2",
 ]

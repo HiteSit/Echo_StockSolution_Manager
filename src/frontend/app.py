@@ -18,6 +18,9 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 import requests
 import streamlit as st
 
+# Import authentication module
+from auth import check_authentication
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -71,48 +74,69 @@ if "confirmation_type" not in st.session_state:
 
 def main() -> None:
     """Main application entry point."""
-    # Header section
-    st.markdown(f"<h1 class='main-header'>{APP_TITLE}</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p>{APP_DESCRIPTION}</p>", unsafe_allow_html=True)
     
-    # Status indicator for backend connectivity
-    with st.sidebar:
-        st.markdown("### System Status")
-        check_backend_status()
+    # Check user authentication
+    is_authenticated, user_name, user_role, authenticator = check_authentication()
+    
+    # Only show the app if the user is authenticated
+    if is_authenticated:
+        # Show user info and logout in sidebar
+        with st.sidebar:
+            st.success(f"Welcome, {user_name}")
+            authenticator.logout("Logout", "sidebar")
+            st.divider()
+            
+            # Display role information
+            st.info(f"Role: {user_role}")
+            
+            # System status
+            st.markdown("### System Status")
+            check_backend_status()
+            
+            st.markdown("### Actions")
+            if st.button("Refresh Chemical Groups", key="refresh_btn"):
+                st.cache_data.clear()
+                st.session_state.awaiting_confirmation = False
+                st.session_state.upload_data = None
+                st.rerun()
         
-        st.markdown("### Actions")
-        if st.button("Refresh Chemical Groups", key="refresh_btn"):
-            st.cache_data.clear()
-            st.session_state.awaiting_confirmation = False
-            st.session_state.upload_data = None
-            st.rerun()
-    
-    # Fetch chemical groups
-    groups, group_error = get_chemical_groups()
-    
-    if group_error:
-        st.error(f"Backend Error: {group_error}")
-        display_troubleshooting_info()
-        return
+        # Header section
+        st.markdown(f"<h1 class='main-header'>{APP_TITLE}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p>{APP_DESCRIPTION}</p>", unsafe_allow_html=True)
         
-    if not groups:
-        st.warning("No chemical groups found. Please check backend configuration.")
-        display_troubleshooting_info()
-        return
+        # Fetch chemical groups
+        groups, group_error = get_chemical_groups()
+        
+        if group_error:
+            st.error(f"Backend Error: {group_error}")
+            display_troubleshooting_info()
+            return
+            
+        if not groups:
+            st.warning("No chemical groups found. Please check backend configuration.")
+            display_troubleshooting_info()
+            return
+        
+        # Check if we're waiting for confirmation
+        if st.session_state.awaiting_confirmation and st.session_state.upload_data:
+            display_confirmation_dialog(st.session_state.upload_data)
+            return
+        
+        # Create tabs for different functions
+        upload_tab, visualize_tab = st.tabs(["Upload CSV", "Data Visualization Dashboard"])
+        
+        with upload_tab:
+            # Only allow upload for admin and user roles
+            if user_role in ["admin", "user"]:
+                display_upload_interface(groups)
+            else:
+                st.warning("You do not have permission to upload files. Please contact an administrator.")
+        
+        with visualize_tab:
+            display_data_visualization_dashboard()
     
-    # Check if we're waiting for confirmation
-    if st.session_state.awaiting_confirmation and st.session_state.upload_data:
-        display_confirmation_dialog(st.session_state.upload_data)
-        return
-    
-    # Create tabs for different functions
-    upload_tab, visualize_tab = st.tabs(["Upload CSV", "Data Visualization Dashboard"])
-    
-    with upload_tab:
-        display_upload_interface(groups)
-    
-    with visualize_tab:
-        display_data_visualization_dashboard()
+    # No additional code needed here as the check_authentication function already handles 
+    # displaying the login form and authentication messages
 
 
 def display_upload_interface(groups: List[str]) -> None:

@@ -5,19 +5,32 @@ A modern, robust platform for uploading, validating, and merging chemical group 
 ---
 
 ## Table of Contents
-- [Features](#features)
-- [Architecture & Repository Structure](#architecture--repository-structure)
-- [Setup & Quickstart](#setup--quickstart)
-- [Running the Application](#running-the-application)
-  - [Local (localhost-only)](#1-run-locally-default)
-  - [On a Local Network (LAN)](#2-run-on-local-network-lan)
-  - [On the Internet (Production)](#3-run-on-the-internet-production)
-- [Configuration & Customization](#configuration--customization)
-- [Backend Details](#backend-details)
-- [Frontend Details](#frontend-details)
-- [Dependencies](#dependencies)
-- [Troubleshooting](#troubleshooting)
-- [FAQ](#faq)
+- [Chemical Groups Web Application](#chemical-groups-web-application)
+  - [Table of Contents](#table-of-contents)
+  - [Features](#features)
+  - [Architecture \& Repository Structure](#architecture--repository-structure)
+  - [Setup \& Quickstart](#setup--quickstart)
+    - [Prerequisites](#prerequisites)
+    - [One-Command Launch (Recommended)](#one-command-launch-recommended)
+  - [Running the Application](#running-the-application)
+    - [1. Run Locally (Default)](#1-run-locally-default)
+    - [2. Run on Local Network (LAN)](#2-run-on-local-network-lan)
+    - [3. Run on the Internet (Production)](#3-run-on-the-internet-production)
+  - [Authentication](#authentication)
+    - [Default Users](#default-users)
+    - [User Roles](#user-roles)
+    - [User Management](#user-management)
+      - [List Users](#list-users)
+      - [Add User](#add-user)
+      - [Update Role](#update-role)
+      - [Update Password](#update-password)
+      - [Remove User](#remove-user)
+    - [Generate Password Hash](#generate-password-hash)
+  - [Configuration \& Customization](#configuration--customization)
+  - [Frontend Details](#frontend-details)
+  - [Dependencies](#dependencies)
+  - [Troubleshooting](#troubleshooting)
+  - [FAQ](#faq)
 
 ---
 
@@ -28,6 +41,7 @@ A modern, robust platform for uploading, validating, and merging chemical group 
 - Advanced data visualization dashboard for exploring chemical data
 - Interactive filtering, sorting, and statistical analysis tools
 - Chemical property visualizations and timeline analytics
+- User authentication with role-based permissions
 - Intuitive Streamlit web interface
 - REST API (FastAPI) for programmatic access
 - Automated one-command launch with advanced error handling
@@ -42,8 +56,15 @@ A modern, robust platform for uploading, validating, and merging chemical group 
 │   ├── backend/
 │   │   └── main.py     # FastAPI backend
 │   └── frontend/
-│       └── app.py      # Streamlit frontend
-├── data/               # Data/config directory (chemical_groups.json, Example.csv, master CSVs)
+│       ├── app.py      # Streamlit frontend
+│       ├── auth.py     # Authentication module
+│       ├── manage_users.py # User management utility
+│       └── password_hasher.py # Password hashing utility
+├── data/               # Data/config directory
+│   ├── chemical_groups.json # Chemical groups configuration
+│   ├── users.json      # User credentials 
+│   ├── Example.csv     # Reference CSV schema
+│   └── master_*.csv    # Master CSVs for each group
 ├── requirements.txt    # Python dependencies
 ├── pyproject.toml      # Project metadata
 ├── .venv/              # (Recommended) Virtual environment
@@ -129,6 +150,56 @@ To expose the app publicly:
    - Restrict backend API to only needed origins.
    - Regularly update dependencies.
    - Consider running behind authentication or VPN for sensitive data.
+
+## Authentication
+The application uses streamlit-authenticator for user authentication. All users must log in to access the system, and their permissions are based on their role.
+
+### Default Users
+The system comes with three default users:
+- **Admin**: Username: `admin`, Password: `adminpass123`
+- **User**: Username: `user1`, Password: `userpass123` 
+- **Viewer**: Username: `viewer1`, Password: `viewerpass123`
+
+### User Roles
+There are three user roles with different permissions:
+- **Admin**: Full access to all features including file uploads and data visualization
+- **User**: Can upload files and visualize data, but cannot manage users
+- **Viewer**: Can only view and analyze data, cannot upload files
+
+### User Management
+Users are stored in `data/users.json`. Admins can manage users using the command-line utilities:
+
+#### List Users
+```bash
+python src/frontend/manage_users.py --list
+```
+
+#### Add User
+```bash
+python src/frontend/manage_users.py --add-user username "Full Name" email@example.com role password
+```
+Where `role` is one of: `admin`, `user`, or `viewer`.
+
+#### Update Role
+```bash
+python src/frontend/manage_users.py --update-role username new_role
+```
+
+#### Update Password
+```bash
+python src/frontend/manage_users.py --update-password username new_password
+```
+
+#### Remove User
+```bash
+python src/frontend/manage_users.py --remove-user username
+```
+
+### Generate Password Hash
+To generate a password hash for manual editing of the users.json file:
+```bash
+python src/frontend/password_hasher.py mypassword
+```
 
 ---
 
