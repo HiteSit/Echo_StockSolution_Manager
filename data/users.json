@@ -6,6 +6,12 @@
                 "email": "riccardo.fusco@upol.cz",
                 "role": "admin",
                 "password": "$2b$12$MJWjCBTJVpwlWu5iJlyh3uAN9oKZg9TOQ7MVvIUtQ/3X6xbwhtxIG"
+            },
+            "emis": {
+                "name": "Emis Ingenito",
+                "email": "emis.ingenito@upol.cz",
+                "role": "admin",
+                "password": "$2b$12$8UBFCmwRRlfk5ubx6sscpeCwS81o4CC3HEU4Cas0u0.bta675n0ZW"
             }
         }
     }
